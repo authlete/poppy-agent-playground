@@ -35,3 +35,36 @@ body {
 ::selection {
   background: color-mix(in oklch, var(--color-primary) 18%, transparent);
 }
+
+/* Authlete logo: shield + wordmark composed per the official Figma insets. */
+.authlete-logo {
+  position: relative;
+  display: inline-block;
+  flex: none;
+}
+.authlete-logo--header {
+  width: 140px;
+  height: 24px;
+}
+.authlete-logo--footer {
+  width: 164px;
+  height: 28px;
+}
+.authlete-logo .al-shield,
+.authlete-logo .al-wordmark {
+  position: absolute;
+  display: block;
+}
+.authlete-logo .al-shield {
+  inset: 1.5% 83.68% 1.5% 0.47%;
+}
+.authlete-logo .al-wordmark {
+  inset: 25.27% 0.37% 20.9% 19.92%;
+}
+.authlete-logo img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}

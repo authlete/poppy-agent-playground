@@ -1,0 +1,34 @@
+# Poppy Agent Playground
+
+> Point a Personal Agent at any Poppy Company and drive the Personal Agent
+> Protocol (Poppy) end to end — discovery, a signed-out Session, Direct Sign-In
+> and consent on the Company's own page, and signed-in API calls — with every
+> request decoded on the wire. Built by Authlete.
+
+The Personal Agent Protocol (Poppy) lets an AI agent act for a user against a
+"Company" (a website that exposes Poppy). The agent discovers the Company, holds
+a per-request signed Session, signs the user in on the Company's own page, and
+then calls the Company's APIs with the granted scopes. This playground is a
+working Personal Agent you can drive against any Poppy Company to watch the whole
+handshake.
+
+## What it shows
+
+- Discovery of a Company from its domain (the validated domain↔issuer binding).
+- A signed-out Session, then Direct Sign-In + consent on the Company's own page.
+- Signed-in API calls built from the Company's OpenAPI, with a ready-to-send body.
+- A live wire log that decodes the Poppy-Session JWT and its delegation, the
+  DPoP proof (RFC 9449), and the private_key_jwt client assertion.
+
+## Identity
+
+The agent self-hosts its own client identity as a CIMD (Client ID Metadata
+Document) by default — the served URL is a usable `client_id` — or you can bring
+your own from the UI. DPoP (sender-constrained tokens) is a UI toggle; it is
+optional in Poppy draft 0.4.
+
+## Links
+
+- Playground: https://poppy-playground.authlete.app
+- Authlete: https://www.authlete.com
+- Personal Agent Protocol: https://personalagentprotocol.org

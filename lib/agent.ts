@@ -155,20 +155,64 @@ function view(c: Company): CompanyView {
 interface Schema {
   $ref?: string;
   type?: string;
+  format?: string;
   properties?: Record<string, Schema>;
+  items?: Schema;
+  example?: unknown;
+  default?: unknown;
+  enum?: unknown[];
 }
 
-/** A flat `{field: placeholder}` JSON skeleton for a request body, so the UI can prefill it. */
-function bodySkeleton(
+const deref = (s: Schema, defs: Record<string, Schema>): Schema =>
+  s.$ref ? (defs[s.$ref.split("/").pop()!] ?? {}) : s;
+
+/** A plausible value for a bare string, shaped by its format (and a light date-name hint). */
+function sampleString(format: string | undefined, name: string): string {
+  const iso = new Date().toISOString();
+  if (format === "date" || /date/i.test(name)) return iso.slice(0, 10);
+  if (format === "date-time") return iso;
+  if (format === "email") return "user@example.com";
+  if (format === "uri" || format === "url") return "https://example.com";
+  return "example";
+}
+
+/** A ready-to-send value for a property: its own example/default/enum, else one shaped by type. */
+function sampleValue(schema: Schema, defs: Record<string, Schema>, name: string): unknown {
+  const s = deref(schema, defs);
+  if (s.example !== undefined) return s.example;
+  if (s.default !== undefined) return s.default;
+  if (s.enum?.length) return s.enum[0];
+  switch (s.type) {
+    case "number":
+    case "integer":
+      return 1;
+    case "boolean":
+      return true;
+    case "array":
+      return s.items ? [sampleValue(s.items, defs, name)] : [];
+    case "object":
+      return sampleObject(s, defs);
+    default:
+      return sampleString(s.format, name);
+  }
+}
+
+function sampleObject(s: Schema, defs: Record<string, Schema>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(s.properties ?? {}).map(([k, p]) => [k, sampleValue(p, defs, k)]),
+  );
+}
+
+/** A ready-to-send JSON body for a request: the schema's own example if given, else sampled per field. */
+function requestBodyExample(
   schema: Schema | undefined,
   defs: Record<string, Schema>,
 ): string | undefined {
-  const s = schema?.$ref ? defs[schema.$ref.split("/").pop()!] : schema;
-  if (!s?.properties) return undefined;
-  const blank = (t?: string) =>
-    t === "number" || t === "integer" ? 0 : t === "boolean" ? false : "";
-  const obj = Object.fromEntries(Object.entries(s.properties).map(([k, p]) => [k, blank(p.type)]));
-  return JSON.stringify(obj, null, 2);
+  if (!schema) return undefined;
+  const s = deref(schema, defs);
+  if (s.example !== undefined) return JSON.stringify(s.example, null, 2);
+  if (!s.properties) return undefined;
+  return JSON.stringify(sampleObject(s, defs), null, 2);
 }
 
 /** Read a Company's OpenAPI descriptions into a flat list of callable operations. */
@@ -198,7 +242,7 @@ async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[
           const op = item[method];
           if (!op) continue;
           const scopes = [...new Set((op.security ?? []).flatMap((r) => Object.values(r).flat()))];
-          const bodyExample = bodySkeleton(
+          const bodyExample = requestBodyExample(
             op.requestBody?.content?.["application/json"]?.schema,
             spec.components?.schemas ?? {},
           );

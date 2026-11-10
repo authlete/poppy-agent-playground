@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AgentIdentity } from "@/components/AgentIdentity";
 import { ApiCaller } from "@/components/ApiCaller";
 import { WireLog } from "@/components/WireLog";
+import { SiteFooter, SiteHeader } from "@/components/Chrome";
 import { Button, Pill, Step } from "@/components/ui";
 import { get, post, type Envelope } from "@/lib/client";
 import type { CompanyView, Operation, WireEntry } from "@/lib/types";
@@ -76,55 +77,59 @@ export default function Page() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-4 p-4 md:p-6">
-      <Header state={state} onReset={reset} />
-      {banner ? (
-        <div className="rounded-md border border-line-2 bg-base px-4 py-2 text-[13px] text-ink-2">
-          {banner}
-        </div>
-      ) : null}
+    <>
+      <SiteHeader />
+      <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
+        <Header state={state} onReset={reset} />
+        {banner ? (
+          <div className="rounded-md border border-line-2 bg-base px-4 py-2 text-[13px] text-ink-2">
+            {banner}
+          </div>
+        ) : null}
 
-      <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,460px)]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <AgentIdentity identity={state.identity} dpop={state.dpop ?? true} onChange={refresh} />
+        <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,460px)]">
+          <div className="flex min-w-0 flex-col gap-3">
+            <AgentIdentity identity={state.identity} dpop={state.dpop ?? true} onChange={refresh} />
 
-          <Connect state={state} busy={busy === "discover"} onDiscover={discover} />
+            <Connect state={state} busy={busy === "discover"} onDiscover={discover} />
 
-          {state.company ? (
-            <Step n={2} title="Sign in">
-              <Button onClick={signIn} busy={busy === "signin"} primary>
-                {state.signedIn ? "Sign in again" : `Sign in to ${state.company.name}`}
-              </Button>
-              <p className="text-[12px] text-muted">
-                Requests:{" "}
-                <span className="font-mono text-ink-2">
-                  {state.company.scopes.map((s) => s.name).join(" ")}
-                </span>
-              </p>
-              {state.signedIn ? (
-                <p className="text-[13px] text-ok">
-                  Signed in · granted: {state.scope.join(", ") || "—"}
+            {state.company ? (
+              <Step n={2} title="Sign in">
+                <Button onClick={signIn} busy={busy === "signin"} primary>
+                  {state.signedIn ? "Sign in again" : `Sign in to ${state.company.name}`}
+                </Button>
+                <p className="text-[12px] text-muted">
+                  Requests:{" "}
+                  <span className="font-mono text-ink-2">
+                    {state.company.scopes.map((s) => s.name).join(" ")}
+                  </span>
                 </p>
-              ) : null}
-            </Step>
-          ) : null}
+                {state.signedIn ? (
+                  <p className="text-[13px] text-ok">
+                    Signed in · granted: {state.scope.join(", ") || "—"}
+                  </p>
+                ) : null}
+              </Step>
+            ) : null}
 
-          {state.company ? (
-            <Step n={3} title="Call an API">
-              <ApiCaller
-                operations={state.operations ?? []}
-                signedIn={state.signedIn}
-                onCall={refresh}
-              />
-            </Step>
-          ) : null}
+            {state.company ? (
+              <Step n={3} title="Call an API">
+                <ApiCaller
+                  operations={state.operations ?? []}
+                  signedIn={state.signedIn}
+                  onCall={refresh}
+                />
+              </Step>
+            ) : null}
+          </div>
+
+          <aside className="overflow-hidden rounded-lg border border-line bg-base">
+            <WireLog entries={entries} />
+          </aside>
         </div>
-
-        <aside className="overflow-hidden rounded-lg border border-line bg-base">
-          <WireLog entries={entries} />
-        </aside>
       </div>
-    </div>
+      <SiteFooter />
+    </>
   );
 }
 
