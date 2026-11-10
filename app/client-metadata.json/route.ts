@@ -4,7 +4,9 @@ import { CLIENT_ID, AGENT_URL, REDIRECT_URI, HOSTS_OWN_CIMD } from "@/lib/config
 // The self-hosted CIMD document. The Company's AS fetches this to learn our keys and redirect URIs.
 export function GET() {
   if (!HOSTS_OWN_CIMD || !AGENT_URL) return Response.json({ error: "not_found" }, { status: 404 });
-  const redirectUris = [...new Set([`${AGENT_URL}/callback`, REDIRECT_URI].filter(Boolean))] as string[];
+  const redirectUris = [
+    ...new Set([`${AGENT_URL}/callback`, REDIRECT_URI].filter(Boolean)),
+  ] as string[];
   const doc = clientMetadata({
     clientId: CLIENT_ID,
     clientName: "Poppy Agent Playground",

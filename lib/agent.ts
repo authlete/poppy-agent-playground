@@ -36,7 +36,9 @@ async function generateKey(): Promise<JsonWebKey & { kid: string }> {
     "sign",
     "verify",
   ]);
-  const jwk = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey & { kid: string };
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey & {
+    kid: string;
+  };
   jwk.kid = crypto.randomUUID();
   return jwk;
 }
@@ -115,7 +117,8 @@ async function rebuild(): Promise<void> {
 export async function setIdentity(clientId: string, keyJson: string): Promise<void> {
   if (new URL(clientId).protocol !== "https:") throw new Error("client_id must be an https URL");
   const jwk = JSON.parse(keyJson) as JsonWebKey & { kid: string };
-  if (jwk.kty !== "EC" || !jwk.kid || !jwk.d) throw new Error("key must be a private EC JWK with a kid");
+  if (jwk.kty !== "EC" || !jwk.kid || !jwk.d)
+    throw new Error("key must be a private EC JWK with a kid");
   globals.__poppyIdentity = { clientId, jwk };
   await rebuild();
 }
@@ -149,6 +152,25 @@ function view(c: Company): CompanyView {
   };
 }
 
+interface Schema {
+  $ref?: string;
+  type?: string;
+  properties?: Record<string, Schema>;
+}
+
+/** A flat `{field: placeholder}` JSON skeleton for a request body, so the UI can prefill it. */
+function bodySkeleton(
+  schema: Schema | undefined,
+  defs: Record<string, Schema>,
+): string | undefined {
+  const s = schema?.$ref ? defs[schema.$ref.split("/").pop()!] : schema;
+  if (!s?.properties) return undefined;
+  const blank = (t?: string) =>
+    t === "number" || t === "integer" ? 0 : t === "boolean" ? false : "";
+  const obj = Object.fromEntries(Object.entries(s.properties).map(([k, p]) => [k, blank(p.type)]));
+  return JSON.stringify(obj, null, 2);
+}
+
 /** Read a Company's OpenAPI descriptions into a flat list of callable operations. */
 async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[]> {
   const ops: Operation[] = [];
@@ -157,7 +179,18 @@ async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[
     try {
       const spec = (await (await s.fetch(api.url)).json()) as {
         servers?: { url: string }[];
-        paths?: Record<string, Record<string, { summary?: string; security?: Record<string, string[]>[] }>>;
+        components?: { schemas?: Record<string, Schema> };
+        paths?: Record<
+          string,
+          Record<
+            string,
+            {
+              summary?: string;
+              security?: Record<string, string[]>[];
+              requestBody?: { content?: Record<string, { schema?: Schema }> };
+            }
+          >
+        >;
       };
       const base = (spec.servers?.[0]?.url ?? `https://${c.domain}`).replace(/\/$/, "");
       for (const [path, item] of Object.entries(spec.paths ?? {})) {
@@ -165,7 +198,18 @@ async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[
           const op = item[method];
           if (!op) continue;
           const scopes = [...new Set((op.security ?? []).flatMap((r) => Object.values(r).flat()))];
-          ops.push({ method: method.toUpperCase(), path, url: `${base}${path}`, summary: op.summary, scopes });
+          const bodyExample = bodySkeleton(
+            op.requestBody?.content?.["application/json"]?.schema,
+            spec.components?.schemas ?? {},
+          );
+          ops.push({
+            method: method.toUpperCase(),
+            path,
+            url: `${base}${path}`,
+            summary: op.summary,
+            scopes,
+            ...(bodyExample ? { bodyExample } : {}),
+          });
         }
       }
     } catch {
@@ -181,7 +225,14 @@ export async function getState() {
   const identity = { clientId: id?.clientId ?? CLIENT_ID, selfHosted: !id && HOSTS_OWN_CIMD };
   const dpop = !globals.__poppyNoDpop;
   if (!s.company)
-    return { discovered: false as const, defaultWebsite: DEFAULT_COMPANY, identity, dpop, signedIn: false, scope: [] as string[] };
+    return {
+      discovered: false as const,
+      defaultWebsite: DEFAULT_COMPANY,
+      identity,
+      dpop,
+      signedIn: false,
+      scope: [] as string[],
+    };
   const user = await s.agent.user(s.company, LOCAL_USER_ID);
   return {
     discovered: true as const,

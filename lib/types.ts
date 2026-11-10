@@ -15,6 +15,8 @@ export interface Operation {
   url: string;
   summary?: string;
   scopes: string[];
+  /** A JSON skeleton for the request body, built from the OpenAPI schema. */
+  bodyExample?: string;
 }
 
 export interface DecodedJwt {
@@ -35,6 +37,7 @@ export interface WireEntry {
   reqBody?: Record<string, string>;
   poppySession?: DecodedJwt;
   delegation?: DecodedJwt;
+  dpopProof?: DecodedJwt;
   clientAssertion?: DecodedJwt;
   respPreview?: string;
   error?: string;

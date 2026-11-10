@@ -41,13 +41,43 @@ function decodeJwt(token: string): DecodedJwt | undefined {
 
 const SHORTEN = new Set(["code", "refresh_token", "code_verifier", "client_assertion"]);
 
-function readBody(init: RequestInit | undefined): Record<string, string> | undefined {
+function readBody(
+  init: RequestInit | undefined,
+  contentType: string,
+): Record<string, string> | undefined {
   const body = init?.body;
   if (typeof body !== "string" && !(body instanceof URLSearchParams)) return undefined;
-  const params = new URLSearchParams(typeof body === "string" ? body : body.toString());
+  const text = typeof body === "string" ? body : body.toString();
+
+  // JSON body (e.g. a POST payload): show its top-level fields.
+  if (contentType.includes("application/json")) {
+    try {
+      const obj = JSON.parse(text);
+      if (obj && typeof obj === "object") {
+        const out: Record<string, string> = {};
+        for (const [k, v] of Object.entries(obj))
+          out[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
+        return Object.keys(out).length > 0 ? out : undefined;
+      }
+    } catch {
+      /* fall through to form parsing */
+    }
+  }
+
+  // Form-encoded body (e.g. the OAuth token request).
+  const params = new URLSearchParams(text);
   const out: Record<string, string> = {};
   for (const [k, v] of params) out[k] = SHORTEN.has(k) && v.length > 24 ? `${v.slice(0, 16)}…` : v;
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** Pretty-print a JSON response for readable display; leave anything else untouched. */
+function prettyJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
 }
 
 const SHOW_HEADERS = new Set([
@@ -63,7 +93,9 @@ const SHOW_HEADERS = new Set([
 function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined): WireEntry {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
-  const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
+  const headers = new Headers(
+    init?.headers ?? (input instanceof Request ? input.headers : undefined),
+  );
 
   const reqHeaders: Record<string, string> = {};
   for (const [name, value] of headers) {
@@ -71,7 +103,7 @@ function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined
     reqHeaders[name] = name.toLowerCase() === "authorization" ? `${value.slice(0, 14)}…` : value;
   }
 
-  const reqBody = readBody(init);
+  const reqBody = readBody(init, headers.get("content-type") ?? "");
   const entry: WireEntry = {
     id: crypto.randomUUID(),
     seq: ++store.seq,
@@ -88,6 +120,9 @@ function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined
     if (typeof session.header["poppy_dlg"] === "string")
       entry.delegation = decodeJwt(session.header["poppy_dlg"]);
   }
+  // The DPoP proof (RFC 9449) that sender-constrains the access token.
+  const dpop = decodeJwt(headers.get("dpop") ?? "");
+  if (dpop) entry.dpopProof = dpop;
   if (typeof init?.body === "string") {
     const assertion = new URLSearchParams(init.body).get("client_assertion");
     if (assertion) entry.clientAssertion = decodeJwt(assertion);
@@ -112,7 +147,7 @@ export function instrumentedFetch(base: typeof fetch = fetch): typeof fetch {
       void res
         .clone()
         .text()
-        .then((text) => (entry.respPreview = text.slice(0, 2000)))
+        .then((text) => (entry.respPreview = prettyJson(text).slice(0, 2000)))
         .catch(() => undefined);
       return res;
     } catch (err) {

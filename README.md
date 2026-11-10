@@ -21,13 +21,13 @@ Open it and enter a Poppy Company's domain. For local dev against a self-signed 
 
 Env vars — `.env.local` for local dev, project settings on Vercel.
 
-| Var | Meaning |
-| --- | --- |
-| `POPPY_AGENT_URL` | This app's public URL (where the AS fetches its CIMD). |
-| `POPPY_AGENT_KEY` | The agent's ES256 key (inline JWK). Generated if unset. |
-| `POPPY_DEFAULT_COMPANY` | Optional prefill for the Company field. |
-| `POPPY_CLIENT_ID` | Bring your own CIMD instead of self-hosting. |
-| `POPPY_REDIRECT_URI` | Override the sign-in redirect (default `{origin}/callback`). |
+| Var                     | Meaning                                                      |
+| ----------------------- | ------------------------------------------------------------ |
+| `POPPY_AGENT_URL`       | This app's public URL (where the AS fetches its CIMD).       |
+| `POPPY_AGENT_KEY`       | The agent's ES256 key (inline JWK). Generated if unset.      |
+| `POPPY_DEFAULT_COMPANY` | Optional prefill for the Company field.                      |
+| `POPPY_CLIENT_ID`       | Bring your own CIMD instead of self-hosting.                 |
+| `POPPY_REDIRECT_URI`    | Override the sign-in redirect (default `{origin}/callback`). |
 
 ## Deploy (Vercel)
 

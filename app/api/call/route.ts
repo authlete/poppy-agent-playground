@@ -10,6 +10,11 @@ export function POST(req: Request) {
       signedOut?: boolean;
     };
     if (!input.url) throw new Error("url is required");
-    return callApi({ url: input.url, method: input.method, body: input.body, signedOut: input.signedOut });
+    return callApi({
+      url: input.url,
+      method: input.method,
+      body: input.body,
+      signedOut: input.signedOut,
+    });
   });
 }

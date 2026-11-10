@@ -24,6 +24,7 @@ export function ApiCaller({
   function select(op: Operation) {
     setSelected(op);
     setSignedOut(op.scopes.length === 0);
+    setBody(op.bodyExample ?? "{}");
     setResult(null);
   }
 
@@ -55,10 +56,16 @@ export function ApiCaller({
                 selected === op ? "border-primary/40 bg-surface" : "border-line"
               }`}
             >
-              <span className="w-12 shrink-0 font-mono text-[11px] font-semibold text-ink-2">{op.method}</span>
-              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">{op.path}</span>
+              <span className="w-12 shrink-0 font-mono text-[11px] font-semibold text-ink-2">
+                {op.method}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-ink">
+                {op.path}
+              </span>
               {op.scopes.length > 0 ? (
-                <span className="shrink-0 font-mono text-[10px] text-faint">{op.scopes.join(" ")}</span>
+                <span className="shrink-0 font-mono text-[10px] text-faint">
+                  {op.scopes.join(" ")}
+                </span>
               ) : (
                 <span className="shrink-0 text-[10px] text-muted">signed-out</span>
               )}
@@ -82,7 +89,11 @@ export function ApiCaller({
           ) : null}
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 text-[12px] text-muted">
-              <input type="checkbox" checked={signedOut} onChange={(e) => setSignedOut(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={signedOut}
+                onChange={(e) => setSignedOut(e.target.checked)}
+              />
               Send signed-out
             </label>
             <Button onClick={send} busy={busy} primary>
@@ -90,7 +101,9 @@ export function ApiCaller({
             </Button>
           </div>
           {!signedIn && !signedOut && selected.scopes.length > 0 ? (
-            <p className="text-[12px] text-muted">Not signed in — this will report the scopes needed.</p>
+            <p className="text-[12px] text-muted">
+              Not signed in — this will report the scopes needed.
+            </p>
           ) : null}
           <Result r={result ?? undefined} />
         </div>
@@ -103,7 +116,7 @@ function Result({ r }: { r?: Envelope<unknown> }) {
   if (!r) return null;
   if (!r.ok)
     return (
-      <p className="text-[13px] text-danger">
+      <p className="break-words text-[13px] text-danger">
         {r.code ? `${r.code}: ` : ""}
         {r.error}
       </p>
@@ -113,7 +126,7 @@ function Result({ r }: { r?: Envelope<unknown> }) {
     return <p className="text-[13px] text-ink-2">Needs sign-in for: {result.scope?.join(", ")}</p>;
   const data = result?.data ?? result;
   return (
-    <pre className="max-h-72 w-full overflow-auto rounded-md bg-surface-2 p-3 font-mono text-[11px] text-ink-2">
+    <pre className="max-h-72 w-full overflow-auto whitespace-pre-wrap break-all rounded-md bg-surface-2 p-3 font-mono text-[11px] text-ink-2">
       {JSON.stringify(data, null, 2)}
     </pre>
   );

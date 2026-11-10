@@ -32,7 +32,8 @@ export default function Page() {
   const [banner, setBanner] = useState<string | null>(null);
 
   const refreshState = async () => setState((await get<Envelope<State>>("/api/state")).result!);
-  const refreshLog = async () => setEntries((await get<{ entries: WireEntry[] }>("/api/log")).entries);
+  const refreshLog = async () =>
+    setEntries((await get<{ entries: WireEntry[] }>("/api/log")).entries);
   const refresh = async () => {
     await refreshState();
     await refreshLog();
@@ -83,8 +84,8 @@ export default function Page() {
         </div>
       ) : null}
 
-      <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_minmax(360px,460px)]">
-        <div className="flex flex-col gap-3">
+      <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,460px)]">
+        <div className="flex min-w-0 flex-col gap-3">
           <AgentIdentity identity={state.identity} dpop={state.dpop ?? true} onChange={refresh} />
 
           <Connect state={state} busy={busy === "discover"} onDiscover={discover} />
@@ -101,14 +102,20 @@ export default function Page() {
                 </span>
               </p>
               {state.signedIn ? (
-                <p className="text-[13px] text-ok">Signed in · granted: {state.scope.join(", ") || "—"}</p>
+                <p className="text-[13px] text-ok">
+                  Signed in · granted: {state.scope.join(", ") || "—"}
+                </p>
               ) : null}
             </Step>
           ) : null}
 
           {state.company ? (
             <Step n={3} title="Call an API">
-              <ApiCaller operations={state.operations ?? []} signedIn={state.signedIn} onCall={refresh} />
+              <ApiCaller
+                operations={state.operations ?? []}
+                signedIn={state.signedIn}
+                onCall={refresh}
+              />
             </Step>
           ) : null}
         </div>
