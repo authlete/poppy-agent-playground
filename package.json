@@ -1,0 +1,26 @@
+{
+  "name": "poppy-agent-playground",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A Personal Agent playground for the Personal Agent Protocol (Poppy): point it at any Poppy Company and drive the protocol end to end.",
+  "scripts": {
+    "dev": "next dev -p 5173 -H 127.0.0.1",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@descope/poppy": "file:./vendor/poppy-js",
+    "next": "16.4.5",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.5",
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

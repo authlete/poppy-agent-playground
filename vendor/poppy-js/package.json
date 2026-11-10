@@ -1,0 +1,17 @@
+{
+  "name": "@descope/poppy",
+  "version": "0.3.0",
+  "description": "Personal Agent Protocol (Poppy) TypeScript SDK — draft 0.3. Vendored, prebuilt to dist.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ]
+}
