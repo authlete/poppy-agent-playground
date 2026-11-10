@@ -1,17 +1,16 @@
 // The Personal Agent: one @descope/poppy PoppyAgent that can drive any Poppy Company. The SDK handles
 // the whole protocol (discovery, per-request Session JWT, Direct Sign-In, refresh, DPoP); these helpers
 // expose each flow to the UI as plain JSON. Every HTTP call is routed through the wire log.
-import { readFile } from "node:fs/promises";
 import { PoppyAgent, type Company, jwks, scopesNeeded } from "@descope/poppy";
-import { ALLOW_PRIVATE, CLIENT_ID, COMPANY_WEBSITE, DISABLE_DPOP, LOCAL_USER_ID, SELF_HOSTED } from "./config";
+import { ALLOW_PRIVATE, CLIENT_ID, DEFAULT_COMPANY, LOCAL_USER_ID, HOSTS_OWN_CIMD } from "./config";
 import { clearWire, instrumentedFetch } from "./wire";
 import type { CompanyView, Operation } from "./types";
 
-// Module globals that survive Next HMR / route-module isolation: the agent singleton and any
-// runtime "bring your own" identity set from the UI.
+// Module globals that survive Next HMR / route-module isolation: the agent singleton, a runtime
+// "bring your own" identity, and the DPoP toggle.
 const globals = globalThis as Record<string, unknown>;
 
-/** Strip the issuer's DPoP support from its metadata, so the SDK requests Bearer tokens (see DISABLE_DPOP). */
+/** Hide the issuer's DPoP support so the SDK requests Bearer tokens (DPoP is optional, spec 4.5). */
 function withoutDpop(base: typeof fetch): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const res = await base(input, init);
@@ -31,13 +30,27 @@ interface AgentSingleton {
   operations: Operation[];
 }
 
-/** Load the agent's ES256 JWK from POPPY_AGENT_KEY (inline JSON) or POPPY_AGENT_KEY_PATH (file). */
+/** Mint an ephemeral ES256 key, stable for this process (self-host without a configured key). */
+async function generateKey(): Promise<JsonWebKey & { kid: string }> {
+  const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+    "sign",
+    "verify",
+  ]);
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.privateKey)) as JsonWebKey & { kid: string };
+  jwk.kid = crypto.randomUUID();
+  return jwk;
+}
+
+/**
+ * The agent's ES256 JWK from POPPY_AGENT_KEY (inline JWK). When self-hosting without it, a key is
+ * generated and reused for the process; a fixed key is only needed for a bring-your-own CIMD or a
+ * multi-instance deploy where every instance must sign alike.
+ */
 async function loadKey(): Promise<JsonWebKey & { kid: string }> {
   const inline = process.env.POPPY_AGENT_KEY;
   if (inline) return JSON.parse(inline);
-  const path = process.env.POPPY_AGENT_KEY_PATH;
-  if (path) return JSON.parse(await readFile(path, "utf8"));
-  throw new Error("Set POPPY_AGENT_KEY (JWK JSON) or POPPY_AGENT_KEY_PATH");
+  if (!HOSTS_OWN_CIMD) throw new Error("Set POPPY_AGENT_KEY for a bring-your-own CIMD");
+  return (globals.__poppyKey ??= generateKey()) as Promise<JsonWebKey & { kid: string }>;
 }
 
 /** The public JWKS to serve at `jwks_uri` when self-hosting the CIMD doc. */
@@ -67,7 +80,7 @@ async function create(): Promise<AgentSingleton> {
   const byo = override();
   const clientId = byo?.clientId ?? CLIENT_ID;
   if (!clientId)
-    throw new Error("Set POPPY_CLIENT_ID (bring your own CIMD) or POPPY_PUBLIC_URL (self-host)");
+    throw new Error("Set POPPY_CLIENT_ID (bring your own CIMD) or POPPY_AGENT_URL (self-host)");
   const jwk = byo?.jwk ?? (await loadKey());
   const privateKey = await crypto.subtle.importKey(
     "jwk",
@@ -76,15 +89,15 @@ async function create(): Promise<AgentSingleton> {
     false,
     ["sign"],
   );
-  const wired = instrumentedFetch();
-  const fetchImpl = DISABLE_DPOP ? withoutDpop(wired) : wired;
+  const base = instrumentedFetch();
+  const wired = globals.__poppyNoDpop ? withoutDpop(base) : base;
   const agent = new PoppyAgent({
     clientId,
     signingKey: { privateKey, kid: jwk.kid },
     allowPrivateAddresses: ALLOW_PRIVATE,
-    fetch: fetchImpl,
+    fetch: wired,
   });
-  return { agent, fetch: fetchImpl, operations: [] };
+  return { agent, fetch: wired, operations: [] };
 }
 
 function singleton(): Promise<AgentSingleton> {
@@ -107,9 +120,15 @@ export async function setIdentity(clientId: string, keyJson: string): Promise<vo
   await rebuild();
 }
 
-/** Revert to the default identity (self-host, or POPPY_CLIENT_ID). */
+/** Revert to the default identity (self-hosted, or POPPY_CLIENT_ID). */
 export async function clearIdentity(): Promise<void> {
   delete globals.__poppyIdentity;
+  await rebuild();
+}
+
+/** Toggle DPoP. Off → the SDK requests plain Bearer tokens (DPoP is optional, spec 4.5). */
+export async function setDpop(enabled: boolean): Promise<void> {
+  globals.__poppyNoDpop = !enabled;
   await rebuild();
 }
 
@@ -159,14 +178,16 @@ async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[
 export async function getState() {
   const s = await singleton();
   const id = override();
-  const identity = { clientId: id?.clientId ?? CLIENT_ID, selfHosted: !id && SELF_HOSTED };
+  const identity = { clientId: id?.clientId ?? CLIENT_ID, selfHosted: !id && HOSTS_OWN_CIMD };
+  const dpop = !globals.__poppyNoDpop;
   if (!s.company)
-    return { discovered: false as const, defaultWebsite: COMPANY_WEBSITE, identity, signedIn: false, scope: [] as string[] };
+    return { discovered: false as const, defaultWebsite: DEFAULT_COMPANY, identity, dpop, signedIn: false, scope: [] as string[] };
   const user = await s.agent.user(s.company, LOCAL_USER_ID);
   return {
     discovered: true as const,
-    defaultWebsite: COMPANY_WEBSITE,
+    defaultWebsite: DEFAULT_COMPANY,
     identity,
+    dpop,
     website: s.website,
     company: view(s.company),
     operations: s.operations,
@@ -176,7 +197,7 @@ export async function getState() {
 }
 
 /** Discover a Company and cache it with its operations (spec 3: validated domain↔issuer binding). */
-export async function discover(website = COMPANY_WEBSITE) {
+export async function discover(website = DEFAULT_COMPANY) {
   const s = await singleton();
   const c = await s.agent.discover(website);
   s.company = c;

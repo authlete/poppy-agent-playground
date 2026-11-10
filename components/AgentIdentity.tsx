@@ -15,9 +15,11 @@ function host(url: string): string {
 /** The agent's own CIMD identity: shown prominently, and switchable to a bring-your-own CIMD. */
 export function AgentIdentity({
   identity,
+  dpop,
   onChange,
 }: {
   identity?: { clientId: string; selfHosted: boolean };
+  dpop: boolean;
   onChange: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
@@ -73,6 +75,18 @@ export function AgentIdentity({
           </button>
         ) : null}
       </div>
+
+      <label className="mt-3 flex items-center justify-between gap-2 text-[12px] text-muted">
+        Sender-constrained tokens (DPoP)
+        <input
+          type="checkbox"
+          checked={dpop}
+          onChange={async (e) => {
+            await post("/api/dpop", { enabled: e.target.checked });
+            await onChange();
+          }}
+        />
+      </label>
 
       {editing ? (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">

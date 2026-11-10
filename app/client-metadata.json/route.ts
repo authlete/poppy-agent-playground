@@ -1,14 +1,14 @@
 import { clientMetadata } from "@descope/poppy";
-import { CLIENT_ID, PUBLIC_URL, REDIRECT_URI, SELF_HOSTED } from "@/lib/config";
+import { CLIENT_ID, AGENT_URL, REDIRECT_URI, HOSTS_OWN_CIMD } from "@/lib/config";
 
 // The self-hosted CIMD document. The Company's AS fetches this to learn our keys and redirect URIs.
 export function GET() {
-  if (!SELF_HOSTED || !PUBLIC_URL) return Response.json({ error: "not_found" }, { status: 404 });
-  const redirectUris = [...new Set([`${PUBLIC_URL}/callback`, REDIRECT_URI].filter(Boolean))] as string[];
+  if (!HOSTS_OWN_CIMD || !AGENT_URL) return Response.json({ error: "not_found" }, { status: 404 });
+  const redirectUris = [...new Set([`${AGENT_URL}/callback`, REDIRECT_URI].filter(Boolean))] as string[];
   const doc = clientMetadata({
     clientId: CLIENT_ID,
     clientName: "Poppy Agent Playground",
-    jwksUri: `${PUBLIC_URL}/jwks.json`,
+    jwksUri: `${AGENT_URL}/jwks.json`,
     redirectUris,
   });
   // clientMetadata() omits these; Authlete needs the signing alg for private_key_jwt (A157306) and

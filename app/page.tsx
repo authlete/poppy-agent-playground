@@ -15,6 +15,7 @@ interface State {
   company?: CompanyView;
   operations?: Operation[];
   identity?: { clientId: string; selfHosted: boolean };
+  dpop?: boolean;
   signedIn: boolean;
   scope: string[];
 }
@@ -84,7 +85,7 @@ export default function Page() {
 
       <div className="grid flex-1 gap-4 lg:grid-cols-[1fr_minmax(360px,460px)]">
         <div className="flex flex-col gap-3">
-          <AgentIdentity identity={state.identity} onChange={refresh} />
+          <AgentIdentity identity={state.identity} dpop={state.dpop ?? true} onChange={refresh} />
 
           <Connect state={state} busy={busy === "discover"} onDiscover={discover} />
 

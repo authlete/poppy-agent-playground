@@ -1,41 +1,29 @@
-// Agent + Company config, all from the environment so the app is deployment-agnostic
-// (local .env.local for dev, Vercel env vars in prod). See .env.example.
+// Agent configuration from the environment. Everything is optional — a deployed instance needs no
+// config: it self-hosts its identity on its own origin and generates a signing key. See .env.example.
 
-function required(name: string): string {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing required env var ${name}`);
-  return v;
-}
+/** Optional prefill for the Company field in the UI; the Company is normally typed there. */
+export const DEFAULT_COMPANY = process.env.POPPY_DEFAULT_COMPANY ?? "";
 
-/** Company website host, e.g. `stays.127.0.0.1.nip.io`. Discovery starts at its `/.well-known/poppy.json`. */
-export const COMPANY_WEBSITE = required("POPPY_COMPANY");
-
-/** This app's public origin, used to self-host the CIMD doc. From POPPY_PUBLIC_URL or Vercel. */
-export const PUBLIC_URL =
-  process.env.POPPY_PUBLIC_URL ??
+/** The public URL where this agent app is reachable — an external AS fetches the self-hosted CIMD
+ *  here. Auto-detected on Vercel; set POPPY_AGENT_URL for local (a tunnel). Must be public. */
+export const AGENT_URL =
+  process.env.POPPY_AGENT_URL ??
   (process.env.VERCEL_PROJECT_PRODUCTION_URL
     ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
     : undefined);
 
 /**
- * The agent's CIMD identity. By default the app self-hosts it at `${PUBLIC_URL}/client-metadata.json`.
- * Bring your own by setting POPPY_CLIENT_ID to an existing CIMD URL (e.g. one from makeclient.dev).
+ * The agent's CIMD identity. By default it is self-hosted at `${AGENT_URL}/client-metadata.json`.
+ * Set POPPY_CLIENT_ID to bring your own CIMD URL instead.
  */
 export const BYO_CLIENT_ID = process.env.POPPY_CLIENT_ID;
-export const SELF_HOSTED = !BYO_CLIENT_ID;
-export const CLIENT_ID = BYO_CLIENT_ID ?? (PUBLIC_URL ? `${PUBLIC_URL}/client-metadata.json` : "");
+export const HOSTS_OWN_CIMD = !BYO_CLIENT_ID;
+export const CLIENT_ID = BYO_CLIENT_ID ?? (AGENT_URL ? `${AGENT_URL}/client-metadata.json` : "");
 
-/** Optional fixed redirect URI; when unset it is derived per request as `{origin}/callback`. Must be a
- *  registered redirect_uri on the CIMD doc. */
+/** Optional fixed Direct Sign-In redirect; defaults per request to `{origin}/callback`. */
 export const REDIRECT_URI = process.env.POPPY_REDIRECT_URI;
 
 export const LOCAL_USER_ID = process.env.POPPY_USER_ID ?? "demo-user";
 
-/** Allow loopback/private Company hosts (local dev only). Off unless explicitly enabled. */
+/** Allow loopback/private Company hosts (local dev only). Off by default. */
 export const ALLOW_PRIVATE = process.env.POPPY_ALLOW_PRIVATE === "true";
-
-/**
- * Opt out of DPoP by hiding the issuer's DPoP support from the SDK, so it requests plain Bearer tokens.
- * Needed for a Company whose resource server validates Bearer but not DPoP-bound tokens.
- */
-export const DISABLE_DPOP = process.env.POPPY_DISABLE_DPOP === "true";
