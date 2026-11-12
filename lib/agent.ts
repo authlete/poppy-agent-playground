@@ -122,11 +122,18 @@ export function identityView(session: SessionData) {
 const companyCache = new Map<string, { company: Company; at: number }>();
 const COMPANY_TTL = 5 * 60_000;
 
-async function cachedCompany(website: string): Promise<Company> {
-  const hit = companyCache.get(website);
+// Keyed by DPoP: the Company's advertised DPoP support decides the token binding, and `withoutDpop`
+// strips it during discovery, so the two choices must cache separate Companies.
+const companyKey = (website: string, dpop: boolean) => `${website}::${dpop}`;
+
+async function cachedCompany(website: string, dpop: boolean): Promise<Company> {
+  const hit = companyCache.get(companyKey(website, dpop));
   if (hit && Date.now() - hit.at < COMPANY_TTL) return hit.company;
-  const company = await discover(website, { fetch, allowPrivateAddresses: ALLOW_PRIVATE });
-  companyCache.set(website, { company, at: Date.now() });
+  const company = await discover(website, {
+    fetch: dpop ? fetch : withoutDpop(fetch),
+    allowPrivateAddresses: ALLOW_PRIVATE,
+  });
+  companyCache.set(companyKey(website, dpop), { company, at: Date.now() });
   return company;
 }
 
@@ -276,7 +283,7 @@ export async function discoverFlow(
   website: string,
 ) {
   const company = await agent.discover(website);
-  companyCache.set(website, { company, at: Date.now() });
+  companyCache.set(companyKey(website, session.dpop), { company, at: Date.now() });
   if (session.company && session.company !== company.identifier)
     for (const k of Object.keys(session.store)) delete session.store[k];
   session.company = company.identifier;
@@ -305,7 +312,7 @@ export async function callFlow(
   session: SessionData,
   input: { website: string; url: string; method?: string; body?: string; signedOut?: boolean },
 ) {
-  const company = await cachedCompany(input.website);
+  const company = await cachedCompany(input.website, session.dpop);
   const user = await agent.user(company, userId(session));
   const res = await user.session().fetch(input.url, {
     method: input.method ?? "GET",
@@ -329,7 +336,7 @@ export async function signInFlow(
   redirectUri: string,
   scope?: string[],
 ) {
-  const company = await cachedCompany(website);
+  const company = await cachedCompany(website, session.dpop);
   const user = await agent.user(company, userId(session));
   const scopes = scope?.length ? scope : Object.keys(company.scopes);
   const { url } = await user.startDirectSignIn({ scope: scopes, redirectUri });
@@ -341,7 +348,7 @@ export async function signInFlow(
 export async function completeFlow(agent: PoppyAgent, session: SessionData, callbackUrl: string) {
   const website = session.pendingWebsite;
   if (!website) throw new Error("No sign-in in progress");
-  const company = await cachedCompany(website);
+  const company = await cachedCompany(website, session.dpop);
   await agent.completeDirectSignIn(company, callbackUrl);
   delete session.pendingWebsite;
 }

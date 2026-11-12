@@ -76,17 +76,24 @@ export function AgentIdentity({
         ) : null}
       </div>
 
-      <label className="mt-3 flex items-center justify-between gap-2 text-[12px] text-muted">
-        Sender-constrained tokens (DPoP)
-        <input
-          type="checkbox"
-          checked={dpop}
-          onChange={async (e) => {
-            await post("/api/dpop", { enabled: e.target.checked });
+      <div className="mt-3 flex items-center justify-between gap-2 text-[12px] text-muted">
+        <span>Sender-constrained tokens (DPoP)</span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={dpop}
+          aria-label="Sender-constrained tokens (DPoP)"
+          onClick={async () => {
+            await post("/api/dpop", { enabled: !dpop });
             await onChange();
           }}
-        />
-      </label>
+          className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${dpop ? "bg-primary" : "bg-line-2"}`}
+        >
+          <span
+            className={`absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-base shadow-sm transition-transform ${dpop ? "translate-x-4" : "translate-x-0"}`}
+          />
+        </button>
+      </div>
 
       <p className="mt-3 border-t border-line pt-3 text-[11px] text-faint">
         Your session stays in your browser — tokens live in an encrypted cookie on your device, used
