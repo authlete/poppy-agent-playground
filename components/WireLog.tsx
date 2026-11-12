@@ -193,13 +193,20 @@ function Row({ e }: { e: WireEntry }) {
   );
 }
 
-export function WireLog({ entries }: { entries: WireEntry[] }) {
+export function WireLog({ entries, onClear }: { entries: WireEntry[]; onClear: () => void }) {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-line px-4 py-3">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold text-ink">Wire</h2>
-          <span className="font-mono text-[11px] text-faint">{entries.length} calls</span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[11px] text-faint">{entries.length} calls</span>
+            {entries.length > 0 ? (
+              <button onClick={onClear} className="text-[12px] text-muted hover:text-ink-2">
+                Clear
+              </button>
+            ) : null}
+          </div>
         </div>
         {entries.length > 0 ? (
           <p className="mt-0.5 text-[11px] text-muted">

@@ -10,14 +10,21 @@ export interface Envelope<T> {
   wire?: WireEntry[];
 }
 
-export async function post<T>(path: string, body?: unknown): Promise<Envelope<T>> {
-  const res = await fetch(path, {
-    method: "POST",
-    ...(body === undefined
-      ? {}
-      : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
-  });
-  return res.json();
+// The session lives in one cookie, so two in-flight writes would lose an update (a slow auto-discover
+// overwriting a just-started sign-in). Serialize posts so the agent only ever mutates it one at a time.
+let chain: Promise<unknown> = Promise.resolve();
+
+export function post<T>(path: string, body?: unknown): Promise<Envelope<T>> {
+  const run = chain.then(() =>
+    fetch(path, {
+      method: "POST",
+      ...(body === undefined
+        ? {}
+        : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    }).then((res) => res.json() as Promise<Envelope<T>>),
+  );
+  chain = run.catch(() => {});
+  return run;
 }
 
 export async function get<T>(path: string): Promise<T> {

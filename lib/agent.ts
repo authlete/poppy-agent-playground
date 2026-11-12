@@ -61,6 +61,33 @@ export async function jwksDocument() {
   return jwks([{ publicKey, kid }]);
 }
 
+// Cache public, dpop-independent metadata GETs per instance (the API spec and the resource metadata) so
+// the SDK's resource resolver doesn't re-fetch them on every call. Served ahead of the wire, so each
+// shows once and then stays quiet. Not the AS metadata — that is rewritten per request by the DPoP toggle.
+const metaCache = new Map<string, { at: number; contentType: string; body: string }>();
+const META_TTL = 5 * 60_000;
+const isMetadata = (url: string) =>
+  /(openapi(\.json)?|oauth-protected-resource)$/i.test(new URL(url).pathname);
+
+function cacheMetadata(base: typeof fetch): typeof fetch {
+  return (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+    if ((init?.method ?? "GET").toUpperCase() !== "GET" || !isMetadata(url))
+      return base(input, init);
+    const hit = metaCache.get(url);
+    if (hit && Date.now() - hit.at < META_TTL)
+      return new Response(hit.body, { status: 200, headers: { "content-type": hit.contentType } });
+    const res = await base(input, init);
+    if (res.ok)
+      metaCache.set(url, {
+        at: Date.now(),
+        contentType: res.headers.get("content-type") ?? "application/json",
+        body: await res.clone().text(),
+      });
+    return res;
+  }) as typeof fetch;
+}
+
 /** Build the agent for one request: its identity (BYO or the default self-hosted), DPoP choice, store,
  *  and a fetch wired to this request's log. */
 export async function buildAgent(
@@ -72,7 +99,7 @@ export async function buildAgent(
   if (!clientId) throw new Error("Set POPPY_CLIENT_ID (bring your own CIMD) or POPPY_AGENT_URL");
   const jwk = session.identity?.jwk ?? (await defaultJwk());
   const privateKey = await importSigning(jwk);
-  const fetch = session.dpop ? wire.fetch() : withoutDpop(wire.fetch());
+  const fetch = cacheMetadata(session.dpop ? wire.fetch() : withoutDpop(wire.fetch()));
   return new PoppyAgent({
     clientId,
     signingKey: { privateKey, kid: jwk.kid },

@@ -123,19 +123,19 @@ export default function Page() {
     return res;
   }
 
-  async function reset() {
+  // Sign out: drop this browser's session (new User ID next time). The wire has its own Clear.
+  async function signOut() {
     await post("/api/reset", {});
     setBanner(null);
     setSignedIn(false);
     setGranted([]);
-    setEntries([]);
   }
 
   return (
     <>
       <SiteHeader />
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
-        <Header discovered={!!company} signedIn={signedIn} onReset={reset} />
+        <Header discovered={!!company} signedIn={signedIn} onSignOut={signOut} />
         {banner ? (
           <div className="rounded-md border border-line-2 bg-base px-4 py-2 text-[13px] text-ink-2">
             {banner}
@@ -180,7 +180,7 @@ export default function Page() {
           </div>
 
           <aside className="overflow-hidden rounded-lg border border-line bg-base">
-            <WireLog entries={entries} />
+            <WireLog entries={entries} onClear={() => setEntries([])} />
           </aside>
         </div>
       </div>
@@ -192,11 +192,11 @@ export default function Page() {
 function Header({
   discovered,
   signedIn,
-  onReset,
+  onSignOut,
 }: {
   discovered: boolean;
   signedIn: boolean;
-  onReset: () => void;
+  onSignOut: () => void;
 }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3">
@@ -209,12 +209,14 @@ function Header({
       <div className="flex items-center gap-2">
         <Pill on={discovered}>{discovered ? "Discovered" : "Not discovered"}</Pill>
         <Pill on={signedIn}>{signedIn ? "Signed in" : "Signed out"}</Pill>
-        <button
-          onClick={onReset}
-          className="rounded-md border border-line-2 bg-base px-3 py-1.5 text-[13px] text-ink-2 hover:bg-surface-2"
-        >
-          Reset
-        </button>
+        {signedIn ? (
+          <button
+            onClick={onSignOut}
+            className="rounded-md border border-line-2 bg-base px-3 py-1.5 text-[13px] text-ink-2 hover:bg-surface-2"
+          >
+            Sign out
+          </button>
+        ) : null}
       </div>
     </header>
   );

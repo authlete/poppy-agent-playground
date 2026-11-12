@@ -37,6 +37,10 @@ export class Account {
             // V8's SyntaxError quotes the input, which holds the refresh token.
             throw new PoppyProtocolError("stored account state is not valid JSON");
         }
+        // PATCH (authlete/poppy-agent-playground): restore persisted access tokens so a stateless
+        // deployment reuses them instead of a refresh_token grant on every call. See PATCHES.md.
+        for (const [key, token] of Object.entries(this.#state.accessTokens ?? {}))
+            this.#tokens.set(key, Promise.resolve(token));
     }
     get signedIn() {
         return this.#state.refreshToken !== undefined;
@@ -113,7 +117,13 @@ export class Account {
     }
     /** Drops a token a resource rejected with `invalid_token`, so the next request gets a new one. */
     invalidate(choice) {
-        this.#tokens.delete(choice.resource ?? "");
+        const key = choice.resource ?? "";
+        this.#tokens.delete(key);
+        // PATCH: forget the persisted copy too, so a token the resource rejected isn't restored next request.
+        if (this.#state.accessTokens?.[key] !== undefined) {
+            const { [key]: _removed, ...rest } = this.#state.accessTokens;
+            void this.#persist({ ...this.#state, accessTokens: rest });
+        }
     }
     #refreshInto(key, choice) {
         const pending = this.#serial(() => this.#refresh(choice)).catch((error) => {
@@ -150,9 +160,17 @@ export class Account {
             throw error;
         }
         const token = parseTokenResponse(body, requested);
+        const access = toAccessToken(token);
+        // PATCH: persist the default-scope access token (keyed by resource) so it survives a stateless
+        // rebuild; narrowed lookups (scope !== undefined) stay ephemeral. See PATCHES.md.
+        let next = this.#state;
         if (token.refreshToken !== undefined && token.refreshToken !== refreshToken)
-            await this.#persist({ ...this.#state, refreshToken: token.refreshToken });
-        return toAccessToken(token);
+            next = { ...next, refreshToken: token.refreshToken };
+        if (scope === undefined)
+            next = { ...next, accessTokens: { ...next.accessTokens, [choice.resource ?? ""]: access } };
+        if (next !== this.#state)
+            await this.#persist(next);
+        return access;
     }
     /** Gets an access token with fewer scopes than the refresh token, such as read-only for a lookup. */
     async narrowedToken(choice, scope) {
@@ -161,7 +179,8 @@ export class Account {
     async #dropAccount() {
         this.#tokens.clear();
         this.#generation++;
-        const { refreshToken: _, scope: __, ...rest } = this.#state;
+        // PATCH: drop persisted access tokens on sign-out too.
+        const { refreshToken: _, scope: __, accessTokens: ___, ...rest } = this.#state;
         await this.#persist(rest);
     }
     /**
@@ -177,13 +196,16 @@ export class Account {
                 throw new PoppyProtocolError("the account signed out while sign-in was pending");
             }
             const previous = this.#state.refreshToken;
+            const access = toAccessToken(token);
             await this.#persist({
                 ...this.#state,
                 refreshToken: token.refreshToken,
                 scope: token.scope.join(" "),
+                // PATCH: persist the sign-in access token so the first API call reuses it.
+                accessTokens: { "": access },
             });
             this.#tokens.clear();
-            this.#tokens.set("", Promise.resolve(toAccessToken(token)));
+            this.#tokens.set("", Promise.resolve(access));
             if (previous !== undefined && previous !== token.refreshToken)
                 await revokeRefreshToken(this.#context(), previous).catch(() => undefined);
             return token.scope;

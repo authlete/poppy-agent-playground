@@ -17,6 +17,7 @@ export async function withSession<T>(
   fn: (ctx: Ctx) => Promise<T>,
 ): Promise<Response> {
   const session = await readSession(req);
+  const before = JSON.stringify(session);
   const wire = new Wire();
   const store = new RecordStore(session.store);
   let agent: ReturnType<typeof buildAgent> | undefined;
@@ -39,7 +40,10 @@ export async function withSession<T>(
   }
   await wire.settle();
   const res = Response.json({ ...body, wire: wire.entries });
-  res.headers.set("Set-Cookie", await sessionCookie(session));
+  // Only set the cookie when the session actually changed, so a slow request reading stale state
+  // can't clobber a concurrent write (e.g. an auto-discover overwriting a just-started sign-in).
+  if (JSON.stringify(session) !== before)
+    res.headers.set("Set-Cookie", await sessionCookie(session));
   return res;
 }
 
