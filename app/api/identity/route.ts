@@ -24,6 +24,7 @@ export function POST(req: Request) {
     for (const k of Object.keys(ctx.session.store)) delete ctx.session.store[k];
     delete ctx.session.pendingWebsite;
     delete ctx.session.company;
+    delete ctx.session.userId;
     return { identity: identityView(ctx.session) };
   });
 }

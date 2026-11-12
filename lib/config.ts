@@ -23,7 +23,5 @@ export const CLIENT_ID = BYO_CLIENT_ID ?? (AGENT_URL ? `${AGENT_URL}/client-meta
 /** Optional fixed Direct Sign-In redirect; defaults per request to `{origin}/callback`. */
 export const REDIRECT_URI = process.env.POPPY_REDIRECT_URI;
 
-export const LOCAL_USER_ID = process.env.POPPY_USER_ID ?? "demo-user";
-
 /** Allow loopback/private Company hosts (local dev only). Off by default. */
 export const ALLOW_PRIVATE = process.env.POPPY_ALLOW_PRIVATE === "true";

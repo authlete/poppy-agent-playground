@@ -17,6 +17,9 @@ export interface SessionData {
   dpop: boolean;
   identity?: Identity;
   pendingWebsite?: string;
+  /** This browser's own id for its User — distinct per browser, so each is a separate User at a
+   *  Company (spec 5.1). The Company never sees it; the SDK maps it to a pairwise User ID. */
+  userId?: string;
   /** Issuer of the Company this session holds state for; switching Companies clears the store so the
    *  cookie stays scoped to one Company (a playground tests one at a time) and never grows unbounded. */
   company?: string;

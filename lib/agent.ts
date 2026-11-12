@@ -3,7 +3,7 @@
 // (discovery, per-request Session JWT, Direct Sign-In, refresh, DPoP); these helpers expose each flow to
 // the routes as plain JSON, with every HTTP call routed through the request's Wire log.
 import { PoppyAgent, type Company, discover, jwks, scopesNeeded, type Store } from "@descope/poppy";
-import { ALLOW_PRIVATE, CLIENT_ID, HOSTS_OWN_CIMD, LOCAL_USER_ID } from "./config";
+import { ALLOW_PRIVATE, CLIENT_ID, HOSTS_OWN_CIMD } from "./config";
 import type { SessionData } from "./session";
 import type { Wire } from "./wire";
 import type { CompanyView, Operation } from "./types";
@@ -258,8 +258,11 @@ async function readOperations(fetch: typeof globalThis.fetch, c: Company): Promi
   return ops;
 }
 
-async function signedInState(agent: PoppyAgent, company: Company) {
-  const user = await agent.user(company, LOCAL_USER_ID);
+/** This browser's own User id, minted once and kept in its cookie (distinct per browser, spec 5.1). */
+const userId = (session: SessionData) => (session.userId ??= crypto.randomUUID());
+
+async function signedInState(agent: PoppyAgent, company: Company, localUserId: string) {
+  const user = await agent.user(company, localUserId);
   return { signedIn: user.signedIn, granted: user.scope };
 }
 
@@ -278,7 +281,11 @@ export async function discoverFlow(
     for (const k of Object.keys(session.store)) delete session.store[k];
   session.company = company.identifier;
   const operations = await readOperations(wire.fetch(), company);
-  return { company: view(company), operations, ...(await signedInState(agent, company)) };
+  return {
+    company: view(company),
+    operations,
+    ...(await signedInState(agent, company, userId(session))),
+  };
 }
 
 async function readResponse(response: Response) {
@@ -295,10 +302,11 @@ async function readResponse(response: Response) {
 /** Call any Company API endpoint. Signed-in unless `signedOut`; returns `needsSignIn` on a scope challenge. */
 export async function callFlow(
   agent: PoppyAgent,
+  session: SessionData,
   input: { website: string; url: string; method?: string; body?: string; signedOut?: boolean },
 ) {
   const company = await cachedCompany(input.website);
-  const user = await agent.user(company, LOCAL_USER_ID);
+  const user = await agent.user(company, userId(session));
   const res = await user.session().fetch(input.url, {
     method: input.method ?? "GET",
     ...(input.signedOut ? { signedOut: true } : {}),
@@ -322,7 +330,7 @@ export async function signInFlow(
   scope?: string[],
 ) {
   const company = await cachedCompany(website);
-  const user = await agent.user(company, LOCAL_USER_ID);
+  const user = await agent.user(company, userId(session));
   const scopes = scope?.length ? scope : Object.keys(company.scopes);
   const { url } = await user.startDirectSignIn({ scope: scopes, redirectUri });
   session.pendingWebsite = website;

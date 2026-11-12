@@ -11,7 +11,7 @@ export function POST(req: Request) {
       signedOut?: boolean;
     };
     if (!input.website || !input.url) throw new Error("website and url are required");
-    return callFlow(await ctx.agent(), {
+    return callFlow(await ctx.agent(), ctx.session, {
       website: input.website,
       url: input.url,
       method: input.method,
