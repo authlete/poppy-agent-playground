@@ -1,9 +1,10 @@
-import { discover } from "@/lib/agent";
-import { json } from "@/lib/handler";
+import { discoverFlow } from "@/lib/agent";
+import { withSession } from "@/lib/handler";
 
 export function POST(req: Request) {
-  return json(async () => {
+  return withSession(req, async (ctx) => {
     const { website } = (await req.json().catch(() => ({}))) as { website?: string };
-    return discover(website || undefined);
+    if (!website) throw new Error("website is required");
+    return discoverFlow(await ctx.agent(), ctx.session, ctx.wire, website);
   });
 }

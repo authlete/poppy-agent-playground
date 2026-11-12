@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentIdentity } from "@/components/AgentIdentity";
 import { ApiCaller } from "@/components/ApiCaller";
 import { WireLog } from "@/components/WireLog";
@@ -9,60 +9,95 @@ import { Button, Pill, Step } from "@/components/ui";
 import { get, post, type Envelope } from "@/lib/client";
 import type { CompanyView, Operation, WireEntry } from "@/lib/types";
 
-interface State {
-  discovered: boolean;
-  defaultWebsite: string;
-  website?: string;
-  company?: CompanyView;
-  operations?: Operation[];
-  identity?: { clientId: string; selfHosted: boolean };
-  dpop?: boolean;
+interface Discovered {
+  company: CompanyView;
+  operations: Operation[];
   signedIn: boolean;
-  scope: string[];
+  granted: string[];
 }
 
+interface Identity {
+  clientId: string;
+  selfHosted: boolean;
+}
+
+const WEBSITE_KEY = "poppy:website";
+
 export default function Page() {
-  const [state, setState] = useState<State>({
-    discovered: false,
-    defaultWebsite: "",
-    signedIn: false,
-    scope: [],
-  });
+  const [identity, setIdentity] = useState<Identity | null>(null);
+  const [dpop, setDpop] = useState(true);
+  const [defaultWebsite, setDefaultWebsite] = useState("");
+  const [website, setWebsite] = useState("");
+  const [company, setCompany] = useState<CompanyView | null>(null);
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [signedIn, setSignedIn] = useState(false);
+  const [granted, setGranted] = useState<string[]>([]);
   const [entries, setEntries] = useState<WireEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const ran = useRef(false);
 
-  const refreshState = async () => setState((await get<Envelope<State>>("/api/state")).result!);
-  const refreshLog = async () =>
-    setEntries((await get<{ entries: WireEntry[] }>("/api/log")).entries);
-  const refresh = async () => {
-    await refreshState();
-    await refreshLog();
+  const logWire = (res: { wire?: WireEntry[] }) => {
+    if (res.wire?.length) setEntries((prev) => [...prev, ...res.wire!]);
   };
 
-  // Load state, show the sign-in outcome, and keep the wire live.
+  async function discover(site: string) {
+    setBusy("discover");
+    const res = await post<Discovered>("/api/discover", { website: site });
+    logWire(res);
+    if (res.ok && res.result) {
+      const { company, operations, signedIn, granted } = res.result;
+      setCompany(company);
+      setOperations(operations);
+      setSignedIn(signedIn);
+      setGranted(granted);
+      setWebsite(site);
+      localStorage.setItem(WEBSITE_KEY, site);
+    } else {
+      setBanner(res.error ?? "Discovery failed");
+    }
+    setBusy(null);
+  }
+
+  // Load identity + DPoP choice, surface the sign-in outcome, and discover the last/default Company.
   useEffect(() => {
-    refresh();
-    const params = new URL(window.location.href).searchParams;
-    const signin = params.get("signin");
-    if (signin === "ok") setBanner("Signed in.");
-    if (signin === "error") setBanner(`Sign-in failed: ${params.get("msg") ?? ""}`);
-    if (signin) window.history.replaceState({}, "", "/");
-    const timer = setInterval(refreshLog, 1500);
-    return () => clearInterval(timer);
+    if (ran.current) return;
+    ran.current = true;
+    (async () => {
+      const boot =
+        await get<Envelope<{ identity: Identity; dpop: boolean; defaultWebsite: string }>>(
+          "/api/bootstrap",
+        );
+      if (boot.result) {
+        setIdentity(boot.result.identity);
+        setDpop(boot.result.dpop);
+        setDefaultWebsite(boot.result.defaultWebsite);
+      }
+      const params = new URL(window.location.href).searchParams;
+      const signin = params.get("signin");
+      if (signin === "ok") setBanner("Signed in.");
+      if (signin === "error") setBanner(`Sign-in failed: ${params.get("msg") ?? ""}`);
+      if (signin) window.history.replaceState({}, "", "/");
+
+      const site = localStorage.getItem(WEBSITE_KEY) || boot.result?.defaultWebsite;
+      if (site) await discover(site);
+    })();
   }, []);
 
-  async function discover(website: string) {
-    setBusy("discover");
-    const res = await post("/api/discover", { website });
-    if (!res.ok) setBanner(res.error ?? "Discovery failed");
-    await refresh();
-    setBusy(null);
+  async function refreshIdentity() {
+    const boot = await get<Envelope<{ identity: Identity; dpop: boolean }>>("/api/bootstrap");
+    if (boot.result) {
+      setIdentity(boot.result.identity);
+      setDpop(boot.result.dpop);
+    }
+    setSignedIn(false);
+    setGranted([]);
   }
 
   async function signIn() {
     setBusy("signin");
-    const res = await post<{ url: string }>("/api/signin");
+    const res = await post<{ url: string }>("/api/signin", { website });
+    logWire(res);
     if (res.ok && res.result) window.location.href = res.result.url;
     else {
       setBanner(res.error ?? "Could not start sign-in");
@@ -70,17 +105,37 @@ export default function Page() {
     }
   }
 
+  async function callApi(input: {
+    url: string;
+    method: string;
+    body?: string;
+    signedOut?: boolean;
+  }) {
+    const res = await post<{ signedIn: boolean; granted: string[] }>("/api/call", {
+      website,
+      ...input,
+    });
+    logWire(res);
+    if (res.ok && res.result) {
+      setSignedIn(res.result.signedIn);
+      setGranted(res.result.granted);
+    }
+    return res;
+  }
+
   async function reset() {
-    await post("/api/reset");
+    await post("/api/reset", {});
     setBanner(null);
-    await refresh();
+    setSignedIn(false);
+    setGranted([]);
+    setEntries([]);
   }
 
   return (
     <>
       <SiteHeader />
       <div className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 p-4 md:p-6">
-        <Header state={state} onReset={reset} />
+        <Header discovered={!!company} signedIn={signedIn} onReset={reset} />
         {banner ? (
           <div className="rounded-md border border-line-2 bg-base px-4 py-2 text-[13px] text-ink-2">
             {banner}
@@ -89,36 +144,37 @@ export default function Page() {
 
         <div className="grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(360px,460px)]">
           <div className="flex min-w-0 flex-col gap-3">
-            <AgentIdentity identity={state.identity} dpop={state.dpop ?? true} onChange={refresh} />
+            <AgentIdentity identity={identity} dpop={dpop} onChange={refreshIdentity} />
 
-            <Connect state={state} busy={busy === "discover"} onDiscover={discover} />
+            <Connect
+              website={website || defaultWebsite}
+              busy={busy === "discover"}
+              onDiscover={discover}
+              company={company}
+            />
 
-            {state.company ? (
+            {company ? (
               <Step n={2} title="Sign in">
                 <Button onClick={signIn} busy={busy === "signin"} primary>
-                  {state.signedIn ? "Sign in again" : `Sign in to ${state.company.name}`}
+                  {signedIn ? "Sign in again" : `Sign in to ${company.name}`}
                 </Button>
                 <p className="text-[12px] text-muted">
                   Requests:{" "}
                   <span className="font-mono text-ink-2">
-                    {state.company.scopes.map((s) => s.name).join(" ")}
+                    {company.scopes.map((s) => s.name).join(" ")}
                   </span>
                 </p>
-                {state.signedIn ? (
+                {signedIn ? (
                   <p className="text-[13px] text-ok">
-                    Signed in · granted: {state.scope.join(", ") || "—"}
+                    Signed in · granted: {granted.join(", ") || "—"}
                   </p>
                 ) : null}
               </Step>
             ) : null}
 
-            {state.company ? (
+            {company ? (
               <Step n={3} title="Call an API">
-                <ApiCaller
-                  operations={state.operations ?? []}
-                  signedIn={state.signedIn}
-                  onCall={refresh}
-                />
+                <ApiCaller operations={operations} signedIn={signedIn} onCall={callApi} />
               </Step>
             ) : null}
           </div>
@@ -133,7 +189,15 @@ export default function Page() {
   );
 }
 
-function Header({ state, onReset }: { state: State; onReset: () => void }) {
+function Header({
+  discovered,
+  signedIn,
+  onReset,
+}: {
+  discovered: boolean;
+  signedIn: boolean;
+  onReset: () => void;
+}) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3">
       <div>
@@ -143,8 +207,8 @@ function Header({ state, onReset }: { state: State; onReset: () => void }) {
         </p>
       </div>
       <div className="flex items-center gap-2">
-        <Pill on={state.discovered}>{state.discovered ? "Discovered" : "Not discovered"}</Pill>
-        <Pill on={state.signedIn}>{state.signedIn ? "Signed in" : "Signed out"}</Pill>
+        <Pill on={discovered}>{discovered ? "Discovered" : "Not discovered"}</Pill>
+        <Pill on={signedIn}>{signedIn ? "Signed in" : "Signed out"}</Pill>
         <button
           onClick={onReset}
           className="rounded-md border border-line-2 bg-base px-3 py-1.5 text-[13px] text-ink-2 hover:bg-surface-2"
@@ -157,22 +221,24 @@ function Header({ state, onReset }: { state: State; onReset: () => void }) {
 }
 
 function Connect({
-  state,
+  website,
   busy,
   onDiscover,
+  company,
 }: {
-  state: State;
+  website: string;
   busy: boolean;
   onDiscover: (website: string) => void;
+  company: CompanyView | null;
 }) {
-  const [website, setWebsite] = useState("");
-  const value = website || state.website || state.defaultWebsite;
+  const [value, setValue] = useState("");
+  useEffect(() => setValue(website), [website]);
   return (
     <Step n={1} title="Connect to a Company">
       <div className="flex w-full flex-wrap items-center gap-2">
         <input
           value={value}
-          onChange={(e) => setWebsite(e.target.value)}
+          onChange={(e) => setValue(e.target.value)}
           placeholder="company.example.com"
           className="min-w-0 flex-1 rounded-md border border-line-2 bg-base px-3 py-2 font-mono text-[13px] text-ink"
         />
@@ -180,7 +246,7 @@ function Connect({
           Discover
         </Button>
       </div>
-      {state.company ? <CompanyCard c={state.company} /> : null}
+      {company ? <CompanyCard c={company} /> : null}
     </Step>
   );
 }

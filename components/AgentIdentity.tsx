@@ -18,7 +18,7 @@ export function AgentIdentity({
   dpop,
   onChange,
 }: {
-  identity?: { clientId: string; selfHosted: boolean };
+  identity: { clientId: string; selfHosted: boolean } | null;
   dpop: boolean;
   onChange: () => Promise<void>;
 }) {
@@ -87,6 +87,11 @@ export function AgentIdentity({
           }}
         />
       </label>
+
+      <p className="mt-3 border-t border-line pt-3 text-[11px] text-faint">
+        Your session stays in your browser — tokens live in an encrypted cookie on your device, used
+        only for the calls you run here. Never stored on our servers.
+      </p>
 
       {editing ? (
         <div className="mt-3 flex flex-col gap-2 border-t border-line pt-3">

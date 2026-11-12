@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui";
-import { post, type Envelope } from "@/lib/client";
+import type { Envelope } from "@/lib/client";
 import type { Operation } from "@/lib/types";
 
 /** The list of a Company's API operations, plus a panel to call the selected one. */
@@ -13,7 +13,12 @@ export function ApiCaller({
 }: {
   operations: Operation[];
   signedIn: boolean;
-  onCall: () => Promise<void>;
+  onCall: (input: {
+    url: string;
+    method: string;
+    body?: string;
+    signedOut?: boolean;
+  }) => Promise<Envelope<unknown>>;
 }) {
   const [selected, setSelected] = useState<Operation | null>(null);
   const [body, setBody] = useState("{}");
@@ -31,14 +36,14 @@ export function ApiCaller({
   async function send() {
     if (!selected) return;
     setBusy(true);
-    const res = await post("/api/call", {
-      url: selected.url,
-      method: selected.method,
-      signedOut,
-      ...(selected.method === "GET" ? {} : { body }),
-    });
-    setResult(res);
-    await onCall();
+    setResult(
+      await onCall({
+        url: selected.url,
+        method: selected.method,
+        signedOut,
+        ...(selected.method === "GET" ? {} : { body }),
+      }),
+    );
     setBusy(false);
   }
 

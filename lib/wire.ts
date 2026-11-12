@@ -1,31 +1,11 @@
 /**
- * The wire log: a process-wide record of every HTTP call the Poppy SDK makes, so the UI can show the
- * Poppy/OAuth handshake byte by byte. We decode the interesting JWTs (the Poppy-Session and its nested
- * delegation, and the private_key_jwt client assertion) for display — this is a local demo, so showing
- * them is the whole point.
+ * The wire log for one request: every HTTP call the Poppy SDK makes while serving it, collected so the
+ * response can hand them to the browser (the client accumulates them — nothing is kept server-side). We
+ * decode the interesting JWTs (the Poppy-Session and its nested delegation, the DPoP proof, and the
+ * private_key_jwt client assertion) for display — this is a demo, so showing them is the whole point.
  */
 
 import type { DecodedJwt, WireEntry } from "./types";
-
-interface WireStore {
-  entries: WireEntry[];
-  seq: number;
-}
-
-// Survive Next.js HMR / route-module isolation by hanging the store off globalThis.
-const store: WireStore = ((globalThis as Record<string, unknown>).__poppyWire as WireStore) ?? {
-  entries: [],
-  seq: 0,
-};
-(globalThis as Record<string, unknown>).__poppyWire = store;
-
-export function wireEntries(): WireEntry[] {
-  return store.entries;
-}
-
-export function clearWire(): void {
-  store.entries = [];
-}
 
 function decodeJwt(token: string): DecodedJwt | undefined {
   const parts = token.split(".");
@@ -89,8 +69,11 @@ const SHOW_HEADERS = new Set([
   "accept",
 ]);
 
-/** Build the request half of a log entry: method, URL, shown headers, body, and decoded JWTs. */
-function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined): WireEntry {
+function describeRequest(
+  seq: number,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): WireEntry {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
   const headers = new Headers(
@@ -103,16 +86,17 @@ function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined
     reqHeaders[name] = name.toLowerCase() === "authorization" ? `${value.slice(0, 14)}…` : value;
   }
 
-  const reqBody = readBody(init, headers.get("content-type") ?? "");
   const entry: WireEntry = {
     id: crypto.randomUUID(),
-    seq: ++store.seq,
+    seq,
     startedAt: Date.now(),
     method,
     url,
     reqHeaders,
-    ...(reqBody ? { reqBody } : {}),
   };
+
+  const reqBody = readBody(init, headers.get("content-type") ?? "");
+  if (reqBody) entry.reqBody = reqBody;
 
   const session = decodeJwt(headers.get("poppy-session") ?? "");
   if (session) {
@@ -131,29 +115,40 @@ function describeRequest(input: RequestInfo | URL, init: RequestInit | undefined
 }
 
 /**
- * Wraps a `fetch` so every call is logged. Pass the result as the SDK's `fetch` option; the SDK then
- * drives the Company and AS through here, and the UI reads {@link wireEntries}.
+ * Collects the wire log for a single request. Pass {@link Wire.fetch} as the SDK's `fetch`; after the
+ * action finishes, `await wire.settle()` so response bodies are captured, then return `wire.entries`.
  */
-export function instrumentedFetch(base: typeof fetch = fetch): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const entry = describeRequest(input, init);
-    store.entries.push(entry);
-    const startedAt = performance.now();
-    try {
-      const res = await base(input, init);
-      entry.status = res.status;
-      entry.ok = res.ok;
-      entry.durationMs = Math.round(performance.now() - startedAt);
-      void res
-        .clone()
-        .text()
-        .then((text) => (entry.respPreview = prettyJson(text).slice(0, 2000)))
-        .catch(() => undefined);
-      return res;
-    } catch (err) {
-      entry.durationMs = Math.round(performance.now() - startedAt);
-      entry.error = err instanceof Error ? err.message : String(err);
-      throw err;
-    }
-  }) as typeof fetch;
+export class Wire {
+  readonly entries: WireEntry[] = [];
+  #pending: Promise<unknown>[] = [];
+
+  fetch(base: typeof fetch = fetch): typeof fetch {
+    return (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const entry = describeRequest(this.entries.length + 1, input, init);
+      this.entries.push(entry);
+      const startedAt = performance.now();
+      try {
+        const res = await base(input, init);
+        entry.status = res.status;
+        entry.ok = res.ok;
+        entry.durationMs = Math.round(performance.now() - startedAt);
+        this.#pending.push(
+          res
+            .clone()
+            .text()
+            .then((text) => (entry.respPreview = prettyJson(text).slice(0, 2000)))
+            .catch(() => undefined),
+        );
+        return res;
+      } catch (err) {
+        entry.durationMs = Math.round(performance.now() - startedAt);
+        entry.error = err instanceof Error ? err.message : String(err);
+        throw err;
+      }
+    }) as typeof fetch;
+  }
+
+  async settle(): Promise<void> {
+    await Promise.allSettled(this.#pending);
+  }
 }

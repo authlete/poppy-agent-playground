@@ -1,10 +1,13 @@
 // Tiny typed wrappers over the JSON API.
+import type { WireEntry } from "./types";
 
 export interface Envelope<T> {
   ok: boolean;
   result?: T;
   error?: string;
   code?: string;
+  /** HTTP calls the agent made serving this request; the client accumulates them into the wire log. */
+  wire?: WireEntry[];
 }
 
 export async function post<T>(path: string, body?: unknown): Promise<Envelope<T>> {

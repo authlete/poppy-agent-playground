@@ -1,9 +1,9 @@
-import { setDpop } from "@/lib/agent";
-import { json } from "@/lib/handler";
+import { withSession } from "@/lib/handler";
 
 export function POST(req: Request) {
-  return json(async () => {
+  return withSession(req, async (ctx) => {
     const { enabled } = (await req.json().catch(() => ({}))) as { enabled?: boolean };
-    return setDpop(enabled !== false);
+    ctx.session.dpop = enabled !== false;
+    return { dpop: ctx.session.dpop };
   });
 }

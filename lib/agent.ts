@@ -1,14 +1,12 @@
-// The Personal Agent: one @descope/poppy PoppyAgent that can drive any Poppy Company. The SDK handles
-// the whole protocol (discovery, per-request Session JWT, Direct Sign-In, refresh, DPoP); these helpers
-// expose each flow to the UI as plain JSON. Every HTTP call is routed through the wire log.
-import { PoppyAgent, type Company, jwks, scopesNeeded } from "@descope/poppy";
-import { ALLOW_PRIVATE, CLIENT_ID, DEFAULT_COMPANY, LOCAL_USER_ID, HOSTS_OWN_CIMD } from "./config";
-import { clearWire, instrumentedFetch } from "./wire";
+// The Personal Agent, built fresh for each request from the caller's encrypted session (see session.ts),
+// so the playground holds no server-side state. The @descope/poppy SDK drives the whole protocol
+// (discovery, per-request Session JWT, Direct Sign-In, refresh, DPoP); these helpers expose each flow to
+// the routes as plain JSON, with every HTTP call routed through the request's Wire log.
+import { PoppyAgent, type Company, discover, jwks, scopesNeeded, type Store } from "@descope/poppy";
+import { ALLOW_PRIVATE, CLIENT_ID, HOSTS_OWN_CIMD, LOCAL_USER_ID } from "./config";
+import type { SessionData } from "./session";
+import type { Wire } from "./wire";
 import type { CompanyView, Operation } from "./types";
-
-// Module globals that survive Next HMR / route-module isolation: the agent singleton, a runtime
-// "bring your own" identity, and the DPoP toggle.
-const globals = globalThis as Record<string, unknown>;
 
 /** Hide the issuer's DPoP support so the SDK requests Bearer tokens (DPoP is optional, spec 4.5). */
 function withoutDpop(base: typeof fetch): typeof fetch {
@@ -22,15 +20,7 @@ function withoutDpop(base: typeof fetch): typeof fetch {
   }) as typeof fetch;
 }
 
-interface AgentSingleton {
-  agent: PoppyAgent;
-  fetch: typeof fetch;
-  website?: string;
-  company?: Company;
-  operations: Operation[];
-}
-
-/** Mint an ephemeral ES256 key, stable for this process (self-host without a configured key). */
+/** Mint an ephemeral ES256 key, stable for this process (self-host locally without a configured key). */
 async function generateKey(): Promise<JsonWebKey & { kid: string }> {
   const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
     "sign",
@@ -44,20 +34,23 @@ async function generateKey(): Promise<JsonWebKey & { kid: string }> {
 }
 
 /**
- * The agent's ES256 JWK from POPPY_AGENT_KEY (inline JWK). When self-hosting without it, a key is
- * generated and reused for the process; a fixed key is only needed for a bring-your-own CIMD or a
- * multi-instance deploy where every instance must sign alike.
+ * The default self-hosted identity's ES256 JWK. From POPPY_AGENT_KEY (a fixed key, required on a
+ * multi-instance deploy so every instance signs alike); generated and reused per process otherwise.
  */
-async function loadKey(): Promise<JsonWebKey & { kid: string }> {
+function defaultJwk(): Promise<JsonWebKey & { kid: string }> {
   const inline = process.env.POPPY_AGENT_KEY;
-  if (inline) return JSON.parse(inline);
+  if (inline) return Promise.resolve(JSON.parse(inline));
   if (!HOSTS_OWN_CIMD) throw new Error("Set POPPY_AGENT_KEY for a bring-your-own CIMD");
-  return (globals.__poppyKey ??= generateKey()) as Promise<JsonWebKey & { kid: string }>;
+  const g = globalThis as Record<string, unknown>;
+  return (g.__poppyKey ??= generateKey()) as Promise<JsonWebKey & { kid: string }>;
 }
 
-/** The public JWKS to serve at `jwks_uri` when self-hosting the CIMD doc. */
+const importSigning = (jwk: JsonWebKey) =>
+  crypto.subtle.importKey("jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]);
+
+/** The public JWKS to serve at `jwks_uri` for the self-hosted CIMD document. */
 export async function jwksDocument() {
-  const { kty, crv, x, y, kid } = await loadKey();
+  const { kty, crv, x, y, kid } = await defaultJwk();
   const publicKey = await crypto.subtle.importKey(
     "jwk",
     { kty, crv, x, y },
@@ -68,71 +61,46 @@ export async function jwksDocument() {
   return jwks([{ publicKey, kid }]);
 }
 
-interface Identity {
-  clientId: string;
-  jwk: JsonWebKey & { kid: string };
-}
-
-/** A runtime "bring your own" identity set from the UI, overriding the env/self-host default. */
-function override(): Identity | undefined {
-  return globals.__poppyIdentity as Identity | undefined;
-}
-
-async function create(): Promise<AgentSingleton> {
-  const byo = override();
-  const clientId = byo?.clientId ?? CLIENT_ID;
-  if (!clientId)
-    throw new Error("Set POPPY_CLIENT_ID (bring your own CIMD) or POPPY_AGENT_URL (self-host)");
-  const jwk = byo?.jwk ?? (await loadKey());
-  const privateKey = await crypto.subtle.importKey(
-    "jwk",
-    jwk,
-    { name: "ECDSA", namedCurve: "P-256" },
-    false,
-    ["sign"],
-  );
-  const base = instrumentedFetch();
-  const wired = globals.__poppyNoDpop ? withoutDpop(base) : base;
-  const agent = new PoppyAgent({
+/** Build the agent for one request: its identity (BYO or the default self-hosted), DPoP choice, store,
+ *  and a fetch wired to this request's log. */
+export async function buildAgent(
+  store: Store,
+  session: SessionData,
+  wire: Wire,
+): Promise<PoppyAgent> {
+  const clientId = session.identity?.clientId ?? CLIENT_ID;
+  if (!clientId) throw new Error("Set POPPY_CLIENT_ID (bring your own CIMD) or POPPY_AGENT_URL");
+  const jwk = session.identity?.jwk ?? (await defaultJwk());
+  const privateKey = await importSigning(jwk);
+  const fetch = session.dpop ? wire.fetch() : withoutDpop(wire.fetch());
+  return new PoppyAgent({
     clientId,
     signingKey: { privateKey, kid: jwk.kid },
+    store,
+    fetch,
     allowPrivateAddresses: ALLOW_PRIVATE,
-    fetch: wired,
   });
-  return { agent, fetch: wired, operations: [] };
 }
 
-function singleton(): Promise<AgentSingleton> {
-  globals.__poppyAgent ??= create();
-  return globals.__poppyAgent as Promise<AgentSingleton>;
+/** The effective identity shown in the UI (BYO overrides the default self-hosted CIMD). */
+export function identityView(session: SessionData) {
+  return {
+    clientId: session.identity?.clientId ?? CLIENT_ID,
+    selfHosted: !session.identity && HOSTS_OWN_CIMD,
+  };
 }
 
-/** Rebuild the agent from scratch (after an identity change): forget state, drop the singleton, clear the wire. */
-async function rebuild(): Promise<void> {
-  await reset();
-  delete globals.__poppyAgent;
-}
+// Company metadata is public and the same for everyone, so cache it briefly (per instance) to keep
+// signed-in API calls fast and the wire free of repeated discovery noise.
+const companyCache = new Map<string, { company: Company; at: number }>();
+const COMPANY_TTL = 5 * 60_000;
 
-/** Switch to a bring-your-own CIMD identity (a client_id URL + its matching ES256 JWK). */
-export async function setIdentity(clientId: string, keyJson: string): Promise<void> {
-  if (new URL(clientId).protocol !== "https:") throw new Error("client_id must be an https URL");
-  const jwk = JSON.parse(keyJson) as JsonWebKey & { kid: string };
-  if (jwk.kty !== "EC" || !jwk.kid || !jwk.d)
-    throw new Error("key must be a private EC JWK with a kid");
-  globals.__poppyIdentity = { clientId, jwk };
-  await rebuild();
-}
-
-/** Revert to the default identity (self-hosted, or POPPY_CLIENT_ID). */
-export async function clearIdentity(): Promise<void> {
-  delete globals.__poppyIdentity;
-  await rebuild();
-}
-
-/** Toggle DPoP. Off → the SDK requests plain Bearer tokens (DPoP is optional, spec 4.5). */
-export async function setDpop(enabled: boolean): Promise<void> {
-  globals.__poppyNoDpop = !enabled;
-  await rebuild();
+async function cachedCompany(website: string): Promise<Company> {
+  const hit = companyCache.get(website);
+  if (hit && Date.now() - hit.at < COMPANY_TTL) return hit.company;
+  const company = await discover(website, { fetch, allowPrivateAddresses: ALLOW_PRIVATE });
+  companyCache.set(website, { company, at: Date.now() });
+  return company;
 }
 
 function view(c: Company): CompanyView {
@@ -216,12 +184,12 @@ function requestBodyExample(
 }
 
 /** Read a Company's OpenAPI descriptions into a flat list of callable operations. */
-async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[]> {
+async function readOperations(fetch: typeof globalThis.fetch, c: Company): Promise<Operation[]> {
   const ops: Operation[] = [];
   for (const api of c.apis) {
     if (api.type !== "openapi") continue;
     try {
-      const spec = (await (await s.fetch(api.url)).json()) as {
+      const spec = (await (await fetch(api.url)).json()) as {
         servers?: { url: string }[];
         components?: { schemas?: Record<string, Schema> };
         paths?: Record<
@@ -263,48 +231,27 @@ async function readOperations(s: AgentSingleton, c: Company): Promise<Operation[
   return ops;
 }
 
-export async function getState() {
-  const s = await singleton();
-  const id = override();
-  const identity = { clientId: id?.clientId ?? CLIENT_ID, selfHosted: !id && HOSTS_OWN_CIMD };
-  const dpop = !globals.__poppyNoDpop;
-  if (!s.company)
-    return {
-      discovered: false as const,
-      defaultWebsite: DEFAULT_COMPANY,
-      identity,
-      dpop,
-      signedIn: false,
-      scope: [] as string[],
-    };
-  const user = await s.agent.user(s.company, LOCAL_USER_ID);
-  return {
-    discovered: true as const,
-    defaultWebsite: DEFAULT_COMPANY,
-    identity,
-    dpop,
-    website: s.website,
-    company: view(s.company),
-    operations: s.operations,
-    signedIn: user.signedIn,
-    scope: user.scope,
-  };
+async function signedInState(agent: PoppyAgent, company: Company) {
+  const user = await agent.user(company, LOCAL_USER_ID);
+  return { signedIn: user.signedIn, granted: user.scope };
 }
 
-/** Discover a Company and cache it with its operations (spec 3: validated domain↔issuer binding). */
-export async function discover(website = DEFAULT_COMPANY) {
-  const s = await singleton();
-  const c = await s.agent.discover(website);
-  s.company = c;
-  s.website = website;
-  s.operations = await readOperations(s, c);
-  return { company: view(c), operations: s.operations };
-}
+// ── Flows: each takes the per-request agent/session/wire and returns plain JSON ──────────────────
 
-async function currentCompany(): Promise<{ s: AgentSingleton; c: Company }> {
-  const s = await singleton();
-  if (!s.company) await discover();
-  return { s, c: s.company! };
+/** Discover a Company (shown on the wire), with its callable operations and this session's sign-in. */
+export async function discoverFlow(
+  agent: PoppyAgent,
+  session: SessionData,
+  wire: Wire,
+  website: string,
+) {
+  const company = await agent.discover(website);
+  companyCache.set(website, { company, at: Date.now() });
+  if (session.company && session.company !== company.identifier)
+    for (const k of Object.keys(session.store)) delete session.store[k];
+  session.company = company.identifier;
+  const operations = await readOperations(wire.fetch(), company);
+  return { company: view(company), operations, ...(await signedInState(agent, company)) };
 }
 
 async function readResponse(response: Response) {
@@ -319,43 +266,47 @@ async function readResponse(response: Response) {
 }
 
 /** Call any Company API endpoint. Signed-in unless `signedOut`; returns `needsSignIn` on a scope challenge. */
-export async function callApi(input: {
-  url: string;
-  method?: string;
-  body?: string;
-  signedOut?: boolean;
-}) {
-  const { s, c } = await currentCompany();
-  const user = await s.agent.user(c, LOCAL_USER_ID);
+export async function callFlow(
+  agent: PoppyAgent,
+  input: { website: string; url: string; method?: string; body?: string; signedOut?: boolean },
+) {
+  const company = await cachedCompany(input.website);
+  const user = await agent.user(company, LOCAL_USER_ID);
   const res = await user.session().fetch(input.url, {
     method: input.method ?? "GET",
     ...(input.signedOut ? { signedOut: true } : {}),
     ...(input.body ? { headers: { "content-type": "application/json" }, body: input.body } : {}),
   });
+  const state = { signedIn: user.signedIn, granted: user.scope };
   const needed = scopesNeeded(res);
   if (needed !== undefined) {
     await res.body?.cancel();
-    return { needsSignIn: true as const, scope: needed.split(" ").filter(Boolean) };
+    return { needsSignIn: true as const, scope: needed.split(" ").filter(Boolean), ...state };
   }
-  return { needsSignIn: false as const, ...(await readResponse(res)) };
+  return { needsSignIn: false as const, ...(await readResponse(res)), ...state };
 }
 
-/** Start Direct Sign-In. Defaults to every scope the Company advertises. */
-export async function startSignIn(redirectUri: string, scope?: string[]) {
-  const { s, c } = await currentCompany();
-  const user = await s.agent.user(c, LOCAL_USER_ID);
-  const scopes = scope?.length ? scope : Object.keys(c.scopes);
-  return user.startDirectSignIn({ scope: scopes, redirectUri });
+/** Start Direct Sign-In. Records the Company on the session so the callback (any instance) can finish it. */
+export async function signInFlow(
+  agent: PoppyAgent,
+  session: SessionData,
+  website: string,
+  redirectUri: string,
+  scope?: string[],
+) {
+  const company = await cachedCompany(website);
+  const user = await agent.user(company, LOCAL_USER_ID);
+  const scopes = scope?.length ? scope : Object.keys(company.scopes);
+  const { url } = await user.startDirectSignIn({ scope: scopes, redirectUri });
+  session.pendingWebsite = website;
+  return { url };
 }
 
-/** Finish Direct Sign-In from the callback URL (spec 4.2). */
-export async function completeSignIn(callbackUrl: string) {
-  const { s, c } = await currentCompany();
-  return s.agent.completeDirectSignIn(c, callbackUrl);
-}
-
-export async function reset() {
-  const s = await singleton();
-  if (s.company) await s.agent.forget(s.company, LOCAL_USER_ID, { userIds: true });
-  clearWire();
+/** Finish Direct Sign-In from the callback URL (spec 4.2), using the Company recorded at sign-in start. */
+export async function completeFlow(agent: PoppyAgent, session: SessionData, callbackUrl: string) {
+  const website = session.pendingWebsite;
+  if (!website) throw new Error("No sign-in in progress");
+  const company = await cachedCompany(website);
+  await agent.completeDirectSignIn(company, callbackUrl);
+  delete session.pendingWebsite;
 }
