@@ -92,7 +92,7 @@ function Claims({
   );
 }
 
-/** The AS token response: the granted `scope` and `token_type` (Bearer vs DPoP). */
+/** The AS token response: which tokens were issued (AT/RT), the `token_type` (Bearer vs DPoP), scope. */
 function TokenSummary({ preview }: { preview: string }) {
   let obj: Record<string, unknown>;
   try {
@@ -101,10 +101,15 @@ function TokenSummary({ preview }: { preview: string }) {
     return null;
   }
   if (!obj || (obj.token_type === undefined && obj.access_token === undefined)) return null;
+  const tokens = [
+    obj.access_token !== undefined && "access token",
+    obj.refresh_token !== undefined && "refresh token",
+  ].filter(Boolean) as string[];
   const shown = ["token_type", "scope", "expires_in"].filter((k) => obj[k] !== undefined);
   return (
     <Section title="token response" highlight>
       <Rows>
+        {tokens.length ? <Field k="issued" v={tokens.join(" + ")} /> : null}
         {shown.map((k) => (
           <Field key={k} k={k} v={obj[k]} />
         ))}

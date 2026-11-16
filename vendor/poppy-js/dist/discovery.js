@@ -233,6 +233,9 @@ async function fetchOAuthServer(fetchFn, issuer, domain, allowPrivate) {
         revocationEndpoint: string(endpoint("revocation_endpoint", true), "revocation_endpoint"),
         authorizationEndpoint: endpoint("authorization_endpoint", grantTypes.includes("authorization_code")),
         deviceAuthorizationEndpoint: endpoint("device_authorization_endpoint", grantTypes.includes(DEVICE_CODE_GRANT)),
+        // PATCH (authlete/poppy-agent-playground): PAR endpoint (RFC 9126 / spec 4.2). See PATCHES.md.
+        pushedAuthorizationRequestEndpoint: endpoint("pushed_authorization_request_endpoint", false),
+        requirePushedAuthorizationRequests: body["require_pushed_authorization_requests"] === true,
         grantTypesSupported: grantTypes,
         scopesSupported: optionalStringList(body["scopes_supported"], "scopes_supported"),
         protectedResources,

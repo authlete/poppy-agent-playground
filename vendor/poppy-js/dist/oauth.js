@@ -94,6 +94,48 @@ export async function tokenRequest(context, params, dpop) {
             throw error;
     }
 }
+/**
+ * PATCH (authlete/poppy-agent-playground): Pushes the authorization request (RFC 9126 / spec 4.2). Sends
+ * the authorize params + a fresh client assertion (and a DPoP proof when the issuer uses DPoP, so the AS
+ * can bind the code to the key) to the PAR endpoint, and returns the `request_uri` + `expires_in`.
+ * Retries once on a DPoP nonce challenge, like tokenRequest. See PATCHES.md.
+ */
+export async function pushAuthorizationRequest(context, params, dpop) {
+    const url = context.oauth.pushedAuthorizationRequestEndpoint;
+    const origin = new URL(url).origin;
+    for (let attempt = 0;; attempt++) {
+        const headers = {};
+        if (dpop !== undefined)
+            headers["dpop"] = await dpop.key.proof("POST", url, { nonce: dpop.nonces.get(origin) });
+        const body = new URLSearchParams({ ...params, ...(await clientAuth(context)) });
+        const response = await postForm(context.fetch, url, body, headers);
+        const nonce = response.headers.get("dpop-nonce");
+        if (nonce !== null)
+            dpop?.nonces.set(origin, nonce);
+        if (isRedirect(response)) {
+            await response.body?.cancel();
+            throw new PoppyProtocolError("the PAR endpoint redirected");
+        }
+        if (response.ok) {
+            let data;
+            try {
+                data = await response.json();
+            }
+            catch {
+                throw new PoppyProtocolError("PAR response is not JSON");
+            }
+            if (!isObject(data) || typeof data["request_uri"] !== "string")
+                throw new PoppyProtocolError("PAR response has no request_uri");
+            return {
+                requestUri: data["request_uri"],
+                expiresIn: typeof data["expires_in"] === "number" ? data["expires_in"] : undefined,
+            };
+        }
+        const error = await errorFromResponse(response);
+        if (error.error !== "use_dpop_nonce" || dpop === undefined || attempt > 0)
+            throw error;
+    }
+}
 /** Revokes a refresh token (RFC 7009, spec 4.6). */
 export async function revokeRefreshToken(context, token) {
     const body = new URLSearchParams({

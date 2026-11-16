@@ -24,6 +24,23 @@ Edits in `dist/account.js`, each marked `// PATCH`: `load()`, `#refresh()`, `inv
 **Effect on the wire:** sign in → one token → reused across calls → a real `refresh_token` grant only
 when it actually expires.
 
+## 2. Pushed Authorization Requests (PAR, RFC 9126 / Poppy 1.0 §4.2)
+
+**Why.** Poppy 1.0 adds PAR: an agent MUST push when the Company requires it and SHOULD push whenever
+the AS advertises `pushed_authorization_request_endpoint`, sending a DPoP proof so the code is bound to
+the key, then open `/authorize` with only `client_id` + `request_uri`. The stock SDK builds the
+authorize URL inline with no PAR.
+
+**What the patch does.**
+- `discovery.js`: parse `pushed_authorization_request_endpoint` + `require_pushed_authorization_requests`.
+- `oauth.js`: `pushAuthorizationRequest(context, params, dpop)` — POSTs the authorize params + client
+  assertion (+ DPoP proof) to the PAR endpoint, returns `request_uri`/`expires_in` (mirrors
+  `tokenRequest`, same DPoP-nonce retry).
+- `account.js:startDirect`: when the AS advertises the PAR endpoint, push, then open `/authorize` with
+  only `client_id` + `request_uri`; otherwise the inline URL as before.
+
+The push goes through the agent's instrumented fetch, so it shows in the sign-in wire.
+
 ## TODO — upstream this
 
 - [ ] After validating live (days/weeks), fork `descope/poppy-js`, port this change to the **TypeScript

@@ -7,6 +7,7 @@ import { WireLog } from "@/components/WireLog";
 import { SiteFooter, SiteHeader } from "@/components/Chrome";
 import { Button, Pill, Step } from "@/components/ui";
 import { get, post, type Envelope } from "@/lib/client";
+import { awaitSignIn, openSignInTab } from "@/lib/signin";
 import type { CompanyView, Operation, WireEntry } from "@/lib/types";
 
 interface Discovered {
@@ -35,7 +36,9 @@ export default function Page() {
   const [entries, setEntries] = useState<WireEntry[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
+  const [authCode, setAuthCode] = useState<string | null>(null);
   const ran = useRef(false);
+  const signinAbort = useRef<AbortController | null>(null);
 
   const logWire = (res: { wire?: WireEntry[] }) => {
     if (res.wire?.length) setEntries((prev) => [...prev, ...res.wire!]);
@@ -59,7 +62,7 @@ export default function Page() {
     setBusy(null);
   }
 
-  // Load identity + DPoP choice, surface the sign-in outcome, and discover the last/default Company.
+  // Load identity + DPoP choice and discover the last/default Company.
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
@@ -73,12 +76,6 @@ export default function Page() {
         setDpop(boot.result.dpop);
         setDefaultWebsite(boot.result.defaultWebsite);
       }
-      const params = new URL(window.location.href).searchParams;
-      const signin = params.get("signin");
-      if (signin === "ok") setBanner("Signed in.");
-      if (signin === "error") setBanner(`Sign-in failed: ${params.get("msg") ?? ""}`);
-      if (signin) window.history.replaceState({}, "", "/");
-
       const site = localStorage.getItem(WEBSITE_KEY) || boot.result?.defaultWebsite;
       if (site) await discover(site);
     })();
@@ -94,15 +91,44 @@ export default function Page() {
     setGranted([]);
   }
 
+  // Sign in through a new tab, so the main tab keeps all its state. Open it synchronously (or the
+  // browser blocks it), then point it at the AS once /api/signin returns.
   async function signIn() {
+    const tab = openSignInTab();
+    if (!tab) {
+      setBanner("Allow this site to open a tab, then try signing in again.");
+      return;
+    }
     setBusy("signin");
+    setBanner(null);
     const res = await post<{ url: string }>("/api/signin", { website });
     logWire(res);
-    if (res.ok && res.result) window.location.href = res.result.url;
-    else {
+    if (!res.ok || !res.result) {
+      tab.close();
       setBanner(res.error ?? "Could not start sign-in");
       setBusy(null);
+      return;
     }
+    tab.location.href = res.result.url;
+    const controller = new AbortController();
+    signinAbort.current = controller;
+    try {
+      const out = await awaitSignIn(tab, controller.signal);
+      logWire(out); // the callback's wire: the code→token exchange
+      setAuthCode(out.code ?? null);
+      setBanner(out.ok ? "Signed in." : `Sign-in failed: ${out.message ?? ""}`);
+      if (out.ok) await discover(website);
+    } catch (err) {
+      const msg = (err as Error).message;
+      setBanner(msg === "cancelled" ? "Sign-in cancelled." : msg);
+    } finally {
+      signinAbort.current = null;
+      setBusy(null);
+    }
+  }
+
+  function cancelSignIn() {
+    signinAbort.current?.abort();
   }
 
   async function callApi(input: {
@@ -129,6 +155,7 @@ export default function Page() {
     setBanner(null);
     setSignedIn(false);
     setGranted([]);
+    setAuthCode(null);
   }
 
   return (
@@ -155,9 +182,21 @@ export default function Page() {
 
             {company ? (
               <Step n={2} title="Sign in">
-                <Button onClick={signIn} busy={busy === "signin"} primary>
-                  {signedIn ? "Sign in again" : `Sign in to ${company.name}`}
-                </Button>
+                {busy === "signin" ? (
+                  <div className="flex items-center gap-3">
+                    <span className="text-[13px] text-muted">Signing in…</span>
+                    <button
+                      onClick={cancelSignIn}
+                      className="rounded-md border border-line-2 bg-base px-3 py-1.5 text-[13px] text-ink-2 hover:bg-surface-2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <Button onClick={signIn} primary>
+                    {signedIn ? "Sign in again" : `Sign in to ${company.name}`}
+                  </Button>
+                )}
                 <p className="text-[12px] text-muted">
                   Requests:{" "}
                   <span className="font-mono text-ink-2">
@@ -167,6 +206,11 @@ export default function Page() {
                 {signedIn ? (
                   <p className="text-[13px] text-ok">
                     Signed in · granted: {granted.join(", ") || "—"}
+                  </p>
+                ) : null}
+                {authCode ? (
+                  <p className="font-mono text-[11px] text-faint">
+                    auth code: {authCode.slice(0, 16)}… (exchanged for tokens — see Wire)
                   </p>
                 ) : null}
               </Step>

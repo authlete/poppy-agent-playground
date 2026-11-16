@@ -3,7 +3,7 @@ import { DpopKey } from "./dpop.js";
 import { errorBodies, errorFromResponse, PoppyError, PoppyProtocolError } from "./errors.js";
 import { isObject, postForm, sleep } from "./http.js";
 import { randomId } from "./jose.js";
-import { checkSignInUrl, clientAuth, issuerUsesDpop, oauthError, parseTokenResponse, pkce, requireOAuth, revokeRefreshToken, splitScope, tokenRequest, } from "./oauth.js";
+import { checkSignInUrl, clientAuth, issuerUsesDpop, oauthError, parseTokenResponse, pkce, pushAuthorizationRequest, requireOAuth, revokeRefreshToken, splitScope, tokenRequest, } from "./oauth.js";
 /** Refresh access tokens this long before they expire. */
 const EXPIRY_MARGIN = 30_000;
 /** Assumed lifetime of an access token whose response has no `expires_in`. */
@@ -237,14 +237,27 @@ export class Account {
             expiresAt: Date.now() + PENDING_LIFETIME,
         };
         await this.#init.store.set(`${PENDING_PREFIX}${state}`, JSON.stringify(record));
+        const params = {
+            response_type: "code",
+            client_id: this.#init.clientId,
+            redirect_uri: options.redirectUri,
+            scope: scope.join(" "),
+            state,
+            code_challenge: challenge,
+            code_challenge_method: "S256",
+        };
         const url = new URL(oauth.authorizationEndpoint);
-        url.searchParams.set("response_type", "code");
-        url.searchParams.set("client_id", this.#init.clientId);
-        url.searchParams.set("redirect_uri", options.redirectUri);
-        url.searchParams.set("scope", scope.join(" "));
-        url.searchParams.set("state", state);
-        url.searchParams.set("code_challenge", challenge);
-        url.searchParams.set("code_challenge_method", "S256");
+        // PATCH (authlete/poppy-agent-playground): when the AS advertises PAR (RFC 9126 / spec 4.2),
+        // push the request with a DPoP proof and open /authorize with only client_id + request_uri.
+        if (oauth.pushedAuthorizationRequestEndpoint !== undefined) {
+            const { requestUri } = await pushAuthorizationRequest(this.#context(), params, await this.#dpopFor());
+            url.searchParams.set("client_id", this.#init.clientId);
+            url.searchParams.set("request_uri", requestUri);
+        }
+        else {
+            for (const [key, value] of Object.entries(params))
+                url.searchParams.set(key, value);
+        }
         return { url: url.href, state };
     }
     /**
