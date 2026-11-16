@@ -1,7 +1,7 @@
 # Local patches to the vendored `@descope/poppy`
 
-This is a vendored copy of the community `@descope/poppy` SDK (`dist` only). It carries one local
-patch, applied directly to the compiled `dist/account.js`. Keep this file in sync with any change.
+This is a vendored copy of the community `@descope/poppy` SDK (`dist` only). It carries local patches
+applied directly to the compiled `dist`. Keep this file in sync with any change.
 
 ## 1. Persist access tokens (for stateless deployments)
 
@@ -40,6 +40,29 @@ authorize URL inline with no PAR.
   only `client_id` + `request_uri`; otherwise the inline URL as before.
 
 The push goes through the agent's instrumented fetch, so it shows in the sign-in wire.
+
+## 3. Speak Poppy 1.0
+
+**Why.** The vendored SDK predates Poppy 1.0 and only follows `0.3`, so it rejects a 1.0 Company —
+including the deployed `stays.poppysandbox.dev` — at two points:
+
+1. **Discovery.** `discover()` throws `protocol_version 1.0 is not supported`
+   (`SUPPORTED_PROTOCOL_VERSIONS = ["0.3"]`). But the 1.0 `poppy.json` is read the same way the SDK
+   already reads it: `organization.domain`, `auth.issuer`, `auth.scopes`, `auth.scope_hints`, and
+   `apis` all map unchanged, and unknown fields (`supported_versions`) are ignored. The one 1.0
+   addition that touches this flow — PAR — is the patch above.
+2. **Per-request version (spec 3.4).** From 0.4 on, every request carrying the `Poppy-Session`
+   header must also send `Poppy-Version`; a Company rejects one without it as `version_unsupported`
+   (HTTP 400). The 0.3 SDK's `Session.fetch()` sends no such header, so even a signed-out read is
+   rejected. DPoP-at-refresh, PS384, and richer consent are negotiated from authorization-server
+   metadata, so they need no SDK change here.
+
+**What the patch does.**
+
+- `dist/discovery.js`: adds `"1.0"` to `SUPPORTED_PROTOCOL_VERSIONS`.
+- `dist/session.js`: `Session.fetch()` sets `poppy-version` to the chosen document's
+  `company.protocolVersion` alongside the `poppy-session` header (marked `// PATCH`), so a 0.3 and a
+  1.0 Company each get their own version declared.
 
 ## TODO — upstream this
 

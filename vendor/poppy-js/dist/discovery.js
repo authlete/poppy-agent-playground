@@ -1,7 +1,7 @@
 import { PoppyProtocolError } from "./errors.js";
 import { authorizationServerMetadataUrl, checkPublicHost, getJson, httpsUrl, isObject, originOf, resourceMetadataUrl, } from "./http.js";
 /** The `major.minor` versions of `poppy.json` this client follows (spec 3.1). */
-export const SUPPORTED_PROTOCOL_VERSIONS = ["0.3"];
+export const SUPPORTED_PROTOCOL_VERSIONS = ["0.3", "1.0"];
 export const DEVICE_CODE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 export const MEDIATED_SIGN_IN_GRANT = "https://personalagentprotocol.org/grant/mediated-sign-in";
 /** The Agent Skills discovery schema `skill_index` uses (spec 9.4). Other values are ignored. */

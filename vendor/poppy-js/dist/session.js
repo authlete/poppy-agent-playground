@@ -85,6 +85,8 @@ export class Session {
                 url,
                 accessToken: token?.value,
             }));
+            // PATCH: the chosen document's version, required on every Session request (spec 3.4).
+            headers.set("poppy-version", this.company.protocolVersion);
             let dpopNonces;
             if (token !== undefined) {
                 headers.set("authorization", `${token.type} ${token.value}`);
