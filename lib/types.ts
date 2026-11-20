@@ -24,6 +24,20 @@ export interface DecodedJwt {
   claims: Record<string, unknown>;
 }
 
+/** One line in the left-pane agent transcript (what the User sees). */
+export type AgentMsg =
+  | { id: string; role: "user"; text: string }
+  | { id: string; role: "agent"; text: string; data?: unknown; tone?: "ok" | "denied" | "info" };
+
+/** A guided action the User can hand the agent. Derived from the Company's operations. */
+export interface Task {
+  id: string;
+  label: string;
+  hint?: string;
+  run: () => void;
+  disabled?: boolean;
+}
+
 export interface WireEntry {
   id: string;
   seq: number;
