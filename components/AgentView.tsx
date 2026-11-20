@@ -73,19 +73,26 @@ export function AgentView({
         <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-faint">
           Ask the agent
         </div>
-        <div className="flex flex-wrap gap-2">
-          {tasks.map((t) => (
-            <button
-              key={t.id}
-              onClick={t.run}
-              disabled={t.disabled || !!busy}
-              title={t.hint}
-              className="rounded-full border border-line-2 bg-surface px-3 py-1.5 text-[12px] text-ink-2 hover:bg-surface-2 disabled:opacity-40"
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {tasks.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {tasks.map((t) => (
+              <button
+                key={t.id}
+                onClick={t.run}
+                disabled={t.disabled || !!busy}
+                title={t.hint}
+                className="max-w-full truncate whitespace-nowrap rounded-full border border-line-2 bg-surface px-3 py-1.5 text-[12px] text-ink-2 hover:bg-surface-2 disabled:opacity-40"
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[12px] text-muted">
+            {company.name} publishes no OpenAPI operations to call here. Its discovery still shows
+            on the wire.
+          </p>
+        )}
         {granted.length > 0 ? (
           <p className="mt-2 text-[11px] text-faint">
             Granted: <span className="font-mono text-ink-2">{granted.join(" ")}</span>

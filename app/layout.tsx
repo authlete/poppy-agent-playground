@@ -13,10 +13,10 @@ const geistMono = Geist_Mono({
 });
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? "https://poppy-playground.authlete.app";
-const TITLE = "Poppy Agent Playground — drive any Poppy Company";
+const TITLE = "Poppy Agent Playground: drive any Poppy Company";
 const DESCRIPTION =
   "A playground for the Personal Agent Protocol (Poppy): point a Personal Agent at any Poppy " +
-  "Company and run the full flow — discovery, Direct Sign-In, consent, and signed-in API calls — " +
+  "Company and run the full flow (discovery, Direct Sign-In, consent, and signed-in API calls) " +
   "with every request decoded on the wire. Built by Authlete.";
 
 export const metadata: Metadata = {

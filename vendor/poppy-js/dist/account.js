@@ -246,6 +246,12 @@ export class Account {
             code_challenge: challenge,
             code_challenge_method: "S256",
         };
+        // PATCH (spec 4.2 / 10.8, from 1.0): this agent redirects to a new tab and every User shares
+        // one client_id, so it MUST ask for the consent page. Without it a Company could skip the page
+        // for an already-granted account and honor a forwarded link with no page at all. The sign-in is
+        // never same-device here, so it always asks on a 1.0 Company.
+        if (Number(this.#init.company.protocolVersion.split(".")[0]) >= 1)
+            params.prompt = "consent";
         const url = new URL(oauth.authorizationEndpoint);
         // PATCH (authlete/poppy-agent-playground): when the AS advertises PAR (RFC 9126 / spec 4.2),
         // push the request with a DPoP proof and open /authorize with only client_id + request_uri.

@@ -80,7 +80,7 @@ export default function Page() {
       }
     } else {
       logWire(res);
-      setBanner(res.error ?? "Discovery failed");
+      setBanner(discoverError(site, res.error));
     }
     setBusy(null);
   }
@@ -237,7 +237,7 @@ export default function Page() {
           onDiscover={discover}
         />
         {banner ? (
-          <div className="rounded-md border border-line-2 bg-base px-4 py-2 text-[13px] text-ink-2">
+          <div className="rounded-md border border-danger/30 bg-danger/5 px-4 py-2 text-[13px] text-ink-2">
             {banner}
           </div>
         ) : null}
@@ -263,7 +263,11 @@ export default function Page() {
             </div>
           </div>
         ) : (
-          <p className="text-[13px] text-muted">Connecting to a Company…</p>
+          <p className="text-[13px] text-muted">
+            {busy === "discover"
+              ? "Connecting to a Company…"
+              : "No Company connected. Enter a Poppy Company's domain above and Discover."}
+          </p>
         )}
       </div>
       <SiteFooter />
@@ -273,6 +277,17 @@ export default function Page() {
 
 function labelFor(op: Operation): string {
   return op.summary || `${op.method} ${op.path}`;
+}
+
+// Turn the raw discovery failures into something a person can act on. A domain that won't resolve
+// surfaces as "fetch failed"; a domain with no poppy.json 404s; a misconfigured Company carries a
+// real protocol message worth showing (just without the internal "protocol_error:" prefix).
+function discoverError(site: string, error?: string): string {
+  if (!error || /fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|ETIMEDOUT/i.test(error))
+    return `Couldn't reach ${site}. Check the domain and try again.`;
+  if (/poppy\.json/i.test(error) && /\b404\b/.test(error))
+    return `${site} doesn't publish a poppy.json, so it isn't a Poppy Company.`;
+  return error.replace(/^protocol_error:\s*/i, "");
 }
 
 function buildTasks(
@@ -287,25 +302,27 @@ function buildTasks(
   const scopedRead = operations.find((o) => o.method === "GET" && o.scopes.length > 0);
   const write = operations.find((o) => o.method !== "GET");
   const tasks: Task[] = [];
-  if (publicRead)
-    tasks.push({ id: "pub", label: labelFor(publicRead), run: () => runOp(publicRead) });
+  // A Company's OpenAPI summaries can be long sentences, so the chip shows a short label and the
+  // full summary (plus the scopes it needs) rides in the tooltip.
+  const add = (id: string, op: Operation) =>
+    tasks.push({
+      id,
+      label: short(labelFor(op)),
+      hint: [labelFor(op), op.scopes.length ? `needs ${op.scopes.join(" ")}` : "signed-out"]
+        .filter(Boolean)
+        .join(" · "),
+      run: () => runOp(op),
+    });
+  if (publicRead) add("pub", publicRead);
   if (!signedIn && company.signIn.direct)
     tasks.push({ id: "signin", label: `Sign in to ${company.name}`, run: signIn });
-  if (scopedRead)
-    tasks.push({
-      id: "read",
-      label: labelFor(scopedRead),
-      hint: scopedRead.scopes.join(" "),
-      run: () => runOp(scopedRead),
-    });
-  if (write)
-    tasks.push({
-      id: "write",
-      label: labelFor(write),
-      hint: write.scopes.join(" "),
-      run: () => runOp(write),
-    });
+  if (scopedRead) add("read", scopedRead);
+  if (write) add("write", write);
   return tasks;
+}
+
+function short(s: string, n = 42): string {
+  return s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
 }
 
 /** The branded hand-off moment: the Company's own sign-in page, on its own domain, Authlete invisible. */
@@ -326,7 +343,7 @@ function SignInPreview({ company }: { company: CompanyView }) {
           {company.scopes.map((s) => (
             <li key={s.name} className="text-[12px] text-ink-2">
               <span className="font-mono text-[11px] text-primary">{s.name}</span>
-              {s.description ? <span className="text-muted"> — {s.description}</span> : null}
+              {s.description ? <span className="text-muted"> · {s.description}</span> : null}
             </li>
           ))}
         </ul>
@@ -340,8 +357,8 @@ function SignInPreview({ company }: { company: CompanyView }) {
         </div>
       </div>
       <p className="mt-2 text-[11px] text-faint">
-        This page is <span className="font-mono text-ink-2">{host}</span> — {company.name}&apos;s
-        own authorization server. Authlete powers it, invisibly. The sign-in opens in a new tab; the
+        This page is <span className="font-mono text-ink-2">{host}</span>, {company.name}&apos;s own
+        authorization server. Authlete powers it, invisibly. The sign-in opens in a new tab, and the
         requests appear below.
       </p>
     </div>

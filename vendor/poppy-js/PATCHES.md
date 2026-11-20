@@ -63,6 +63,10 @@ including the deployed `stays.poppysandbox.dev` — at two points:
 - `dist/session.js`: `Session.fetch()` sets `poppy-version` to the chosen document's
   `company.protocolVersion` alongside the `poppy-session` header (marked `// PATCH`), so a 0.3 and a
   1.0 Company each get their own version declared.
+- `dist/account.js`: `startDirect()` adds `prompt=consent` to the authorization request on a 1.0
+  Company (spec 4.2, 10.8). This agent redirects to a new tab and every User shares one `client_id`,
+  so it must force the consent page (a Company could otherwise skip it for an already-granted account
+  and honor a forwarded link with no page at all). It is never same-device here.
 
 ## TODO — upstream this
 

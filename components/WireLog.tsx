@@ -221,8 +221,8 @@ export function WireLog({ entries, onClear }: { entries: WireEntry[]; onClear: (
       </div>
       {entries.length === 0 ? (
         <p className="px-4 py-6 text-[13px] text-muted">
-          Every call the agent makes to the Company and its authorization server appears here —
-          decoded.
+          Every request the agent makes shows up here, decoded to the Session JWT, DPoP proof,
+          tokens, and scopes.
         </p>
       ) : (
         <ul className="flex-1 overflow-y-auto">
